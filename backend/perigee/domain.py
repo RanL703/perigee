@@ -20,9 +20,10 @@ class OrbitalObject:
     norad_id: int
     name: str
     object_type: ObjectType
-    tle_line1: str
-    tle_line2: str
+    tle_line1: str | None
+    tle_line2: str | None
     epoch: datetime
+    gp_data: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)

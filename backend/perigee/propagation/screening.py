@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from itertools import combinations
 from math import sqrt
 
+from sgp4 import omm
 from sgp4.api import SGP4_ERRORS, Satrec
 from sgp4.conveniences import jday_datetime
 
@@ -13,10 +14,20 @@ EARTH_RADIUS_KM = 6378.137
 EARTH_MU_KM3_S2 = 398600.4418
 
 
+def _satellite(object_: OrbitalObject) -> Satrec:
+    if object_.gp_data is not None:
+        satellite = Satrec()
+        omm.initialize(satellite, object_.gp_data)
+        return satellite
+    if object_.tle_line1 is None or object_.tle_line2 is None:
+        raise ValueError(f"NORAD {object_.norad_id} has no TLE or GP/OMM data")
+    return Satrec.twoline2rv(object_.tle_line1, object_.tle_line2)
+
+
 def propagate(object_: OrbitalObject, at: datetime) -> StateVector:
     """Return a TEME state vector in kilometres and kilometres per second."""
     utc_at = at.astimezone(UTC)
-    satellite = Satrec.twoline2rv(object_.tle_line1, object_.tle_line2)
+    satellite = _satellite(object_)
     jd, fraction = jday_datetime(utc_at)
     error, position, velocity = satellite.sgp4(jd, fraction)
     if error:
@@ -37,7 +48,7 @@ def _relative_velocity(a: StateVector, b: StateVector) -> float:
 
 
 def _altitude_band_km(object_: OrbitalObject) -> tuple[float, float]:
-    satellite = Satrec.twoline2rv(object_.tle_line1, object_.tle_line2)
+    satellite = _satellite(object_)
     mean_motion_rad_s = satellite.no_kozai / 60.0
     semi_major_axis = (EARTH_MU_KM3_S2 / (mean_motion_rad_s * mean_motion_rad_s)) ** (1 / 3)
     eccentricity = satellite.ecco

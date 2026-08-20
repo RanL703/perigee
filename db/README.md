@@ -15,3 +15,8 @@ docker compose ps
 The service is available only on `127.0.0.1:${POSTGRES_PORT}`. Future schema
 changes will use Alembic migrations once the backend exists; changing an init
 script does not affect an already-created named volume.
+
+The ingestion cache is intentionally outside the repository at
+`data/cache/celestrak_active.json`. A successful CelesTrak response replaces it
+atomically; DNS, HTTP, or malformed-response failures use the previous valid
+cache and report `source=cache` in the headless screening output.

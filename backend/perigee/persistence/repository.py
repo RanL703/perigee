@@ -38,18 +38,20 @@ class PerigeeRepository:
                 object_.tle_line1,
                 object_.tle_line2,
                 object_.epoch,
+                json.dumps(object_.gp_data) if object_.gp_data is not None else None,
             )
             for object_ in objects
         ]
         query = """
-            INSERT INTO objects (norad_id, name, object_type, tle_line1, tle_line2, epoch, last_updated)
-            VALUES ($1, $2, $3::object_type, $4, $5, $6, NOW())
+            INSERT INTO objects (norad_id, name, object_type, tle_line1, tle_line2, epoch, gp_data, last_updated)
+            VALUES ($1, $2, $3::object_type, $4, $5, $6, $7::jsonb, NOW())
             ON CONFLICT (norad_id) DO UPDATE SET
                 name = EXCLUDED.name,
                 object_type = EXCLUDED.object_type,
                 tle_line1 = EXCLUDED.tle_line1,
                 tle_line2 = EXCLUDED.tle_line2,
                 epoch = EXCLUDED.epoch,
+                gp_data = EXCLUDED.gp_data,
                 last_updated = NOW()
         """
         async with self._connection_pool.acquire() as connection:
@@ -119,3 +121,87 @@ class PerigeeRepository:
         async with self._connection_pool.acquire() as connection:
             rows = await connection.fetch(query, event_id, limit)
             return list(reversed([float(row["miss_distance_km"]) for row in rows]))
+
+    async def list_events(
+        self, *, tier: str | None, sort: str, offset: int, limit: int
+    ) -> list[asyncpg.Record]:
+        order_by = {
+            "score_desc": "e.risk_score DESC, e.tca ASC",
+            "tca_asc": "e.tca ASC, e.risk_score DESC",
+        }[sort]
+        query = f"""
+            SELECT e.id, e.tca, e.miss_distance_km, e.relative_velocity_kmps,
+                   e.risk_score, e.risk_tier, e.factor_breakdown, e.screened_at,
+                   a.norad_id AS object_a_id, a.name AS object_a_name,
+                   a.object_type AS object_a_type, b.norad_id AS object_b_id,
+                   b.name AS object_b_name, b.object_type AS object_b_type
+            FROM conjunction_events e
+            JOIN objects a ON a.norad_id = e.object_a_id
+            JOIN objects b ON b.norad_id = e.object_b_id
+            WHERE ($1::risk_tier IS NULL OR e.risk_tier = $1::risk_tier)
+            ORDER BY {order_by}
+            OFFSET $2 LIMIT $3
+        """
+        async with self._connection_pool.acquire() as connection:
+            return await connection.fetch(query, tier, offset, limit)
+
+    async def get_event(self, event_id: UUID) -> dict[str, object] | None:
+        query = """
+            SELECT e.id, e.tca, e.miss_distance_km, e.relative_velocity_kmps,
+                   e.risk_score, e.risk_tier, e.factor_breakdown, e.screened_at,
+                   a.norad_id AS object_a_id, a.name AS object_a_name,
+                   a.object_type AS object_a_type, a.tle_line1 AS object_a_tle_line1,
+                   a.tle_line2 AS object_a_tle_line2, a.epoch AS object_a_epoch,
+                   a.gp_data AS object_a_gp_data, b.norad_id AS object_b_id,
+                   b.name AS object_b_name, b.object_type AS object_b_type,
+                   b.tle_line1 AS object_b_tle_line1, b.tle_line2 AS object_b_tle_line2,
+                   b.epoch AS object_b_epoch, b.gp_data AS object_b_gp_data
+            FROM conjunction_events e
+            JOIN objects a ON a.norad_id = e.object_a_id
+            JOIN objects b ON b.norad_id = e.object_b_id
+            WHERE e.id = $1
+        """
+        history_query = """
+            SELECT screened_at, risk_score, miss_distance_km
+            FROM event_history
+            WHERE event_id = $1
+            ORDER BY screened_at ASC
+        """
+        async with self._connection_pool.acquire() as connection:
+            event = await connection.fetchrow(query, event_id)
+            if event is None:
+                return None
+            history = await connection.fetch(history_query, event_id)
+            event_data = dict(event)
+            for key in ("factor_breakdown", "object_a_gp_data", "object_b_gp_data"):
+                if isinstance(event_data.get(key), str):
+                    event_data[key] = json.loads(event_data[key])
+            return {**event_data, "history": [dict(row) for row in history]}
+
+    async def get_object(self, norad_id: int) -> dict[str, object] | None:
+        query = """
+            SELECT norad_id, name, object_type, tle_line1, tle_line2, epoch, gp_data, last_updated
+            FROM objects
+            WHERE norad_id = $1
+        """
+        async with self._connection_pool.acquire() as connection:
+            row = await connection.fetchrow(query, norad_id)
+            if row is None:
+                return None
+            data = dict(row)
+            if isinstance(data.get("gp_data"), str):
+                data["gp_data"] = json.loads(data["gp_data"])
+            return data
+
+    async def stats(self) -> asyncpg.Record:
+        query = """
+            SELECT
+                (SELECT count(*) FROM objects) AS objects_tracked,
+                (SELECT count(*) FROM conjunction_events) AS events_screened,
+                (SELECT count(*) FROM conjunction_events WHERE risk_tier = 'critical') AS critical_count,
+                (SELECT count(*) FROM conjunction_events WHERE risk_tier = 'elevated') AS elevated_count,
+                (SELECT count(*) FROM conjunction_events WHERE risk_tier = 'low') AS low_count,
+                (SELECT max(screened_at) FROM conjunction_events) AS last_screened_at
+        """
+        async with self._connection_pool.acquire() as connection:
+            return await connection.fetchrow(query)

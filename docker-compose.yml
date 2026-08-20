@@ -16,5 +16,39 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - perigee_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-perigee}:${POSTGRES_PASSWORD:-perigee-local-dev}@postgres:5432/${POSTGRES_DB:-perigee}
+      CELESTRAK_CATALOG_URL: ${CELESTRAK_CATALOG_URL:-https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=JSON}
+      CELESTRAK_CACHE_PATH: /app/data/cache/celestrak_active.json
+      OBJECT_LIMIT: ${OBJECT_LIMIT:-250}
+    volumes:
+      - perigee_catalog_cache:/app/data/cache
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   perigee_postgres_data:
+  perigee_redis_data:
+  perigee_catalog_cache:
