@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "skills": {
+    "database-schema-designer": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "skillPath": "skills/database-schema-designer/SKILL.md",
+      "computedHash": "6a26ca15216bb4bfee66ebf813edcb1e31a8002f3f641f16f550df814b522217"
+    },
+    "design-review": {
+      "source": "jezweb/claude-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/frontend/skills/design-review/SKILL.md",
+      "computedHash": "cc635fd742634e8c688d9caa52f930146488ff556f3d16207993ea7e8cde6ce9"
+    },
+    "design-system": {
+      "source": "jezweb/claude-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/frontend/skills/design-system/SKILL.md",
+      "computedHash": "ffa03dac251f9926e9e49f34923d37b0ea5eba72443e3ccd541047d7dc1c2b80"
+    },
+    "docker-compose": {
+      "source": "bagelhole/devops-security-agent-skills",
+      "sourceType": "github",
+      "skillPath": "devops/containers/docker-compose/SKILL.md",
+      "computedHash": "d3119717854229b9b464a870e811c3f9662caa07c6e06ba756e9d1b84e83c324"
+    },
+    "fastapi": {
+      "source": "fastapi/fastapi",
+      "sourceType": "github",
+      "skillPath": "fastapi/.agents/skills/fastapi/SKILL.md",
+      "computedHash": "e85d9e223fbc3183b1a599bbe8b02d2edf275d046ff5bcfd14352c92cdff52b3"
+    },
+    "fastapi-templates": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/api-scaffolding/skills/fastapi-templates/SKILL.md",
+      "computedHash": "629e7e404a3627790138127508b889bf38de3e7fad3647f2bb4367e5bfd19bd1"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "4eabc66183767153e404b39d1b839b1c37f2d82d86f0a0d7e880a579d8d62336"
+    },
+    "qa-test-planner": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "skillPath": "skills/qa-test-planner/SKILL.md",
+      "computedHash": "c7a27e535b0a21a9ed22578ca0e37a00a00f43b775efe791a2d4be849ce8ffa9"
+    },
+    "react-dev": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "skillPath": "skills/react-dev/SKILL.md",
+      "computedHash": "4ce3a30e2ad46fdb79f01e0e44701f961c055da7f25f9418af0283a7ad54b791"
+    },
+    "shadcn-ui": {
+      "source": "jezweb/claude-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/frontend/skills/shadcn-ui/SKILL.md",
+      "computedHash": "3c80c7348aaab81e251ae73df8413d41348c3f5fbd0fc1cb398dd423ea7df020"
+    }
+  }
+}

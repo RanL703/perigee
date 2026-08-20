@@ -1,0 +1,23 @@
+# Local configuration and service data
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+dist/
+
+# Test and tool output
+.coverage
+coverage/
+playwright-report/
+test-results/
+
+# Runtime cache (the application will create this later)
+data/cache/
