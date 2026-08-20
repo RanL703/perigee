@@ -19,9 +19,24 @@ const navItems: Page[] = [
 
 function App() {
   const [page, setPage] = useState<Page>("Dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleNavigation = (item: Page) => {
+    setPage(item);
+    setSidebarOpen(false);
+  };
 
   return (
-    <div className="app">
+    <div className={`app ${sidebarOpen ? "sidebar-open" : ""}`}>
+      <button
+        className="mobile-menu-button"
+        onClick={() => setSidebarOpen((open) => !open)}
+        aria-label="Toggle navigation"
+        aria-expanded={sidebarOpen}
+      >
+        ☰
+      </button>
+
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">P</div>
@@ -33,7 +48,7 @@ function App() {
             <button
               key={item}
               className={`nav-item ${page === item ? "active" : ""}`}
-              onClick={() => setPage(item)}
+              onClick={() => handleNavigation(item)}
             >
               {item}
             </button>
@@ -43,7 +58,7 @@ function App() {
         <div className="sidebar-bottom">
           <button
             className={`nav-item ${page === "Settings" ? "active" : ""}`}
-            onClick={() => setPage("Settings")}
+            onClick={() => handleNavigation("Settings")}
           >
             Settings
           </button>
@@ -66,9 +81,9 @@ function App() {
         {page === "Dashboard" && <Dashboard />}
         {page === "Objects" && <ObjectsPage />}
         {page === "Screening" && <ScreeningPage />}
-        {page === "Risk Analysis" && <EmptyModule title="Risk Analysis" />}
-        {page === "Propagation" && <EmptyModule title="Propagation" />}
-        {page === "Settings" && <EmptyModule title="Settings" />}
+        {page === "Risk Analysis" && <RiskAnalysisPage />}
+        {page === "Propagation" && <PropagationPage />}
+        {page === "Settings" && <SettingsPage />}
       </main>
     </div>
   );
@@ -202,6 +217,7 @@ function EmptyTable({ message }: { message: string }) {
     </div>
   );
 }
+
 function ScreeningPage() {
   return (
     <div className="screening-page">
@@ -235,9 +251,7 @@ function ScreeningPage() {
             </select>
           </label>
 
-          <button className="screening-btn">
-            Run Screening
-          </button>
+          <button className="screening-btn">Run Screening</button>
         </div>
       </section>
 
@@ -255,12 +269,168 @@ function ScreeningPage() {
   );
 }
 
+function RiskAnalysisPage() {
+  return (
+    <div className="risk-analysis-page">
+      <section className="panel risk-config">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">RISK ASSESSMENT SYSTEM</p>
+            <h2>Risk Analysis</h2>
+          </div>
+        </div>
+
+        <div className="risk-form">
+          <label>
+            <span>OBJECT SOURCE</span>
+            <select defaultValue="">
+              <option value="" disabled>
+                Select object source
+              </option>
+              <option value="catalog">Object Catalog</option>
+              <option value="screening">Screening Results</option>
+            </select>
+          </label>
+
+          <label>
+            <span>RISK MODEL</span>
+            <select defaultValue="">
+              <option value="" disabled>
+                Select risk model
+              </option>
+              <option value="conjunction">Conjunction Risk</option>
+              <option value="collision">Collision Risk</option>
+            </select>
+          </label>
+
+          <label>
+            <span>ANALYSIS WINDOW</span>
+            <input type="text" placeholder="Enter analysis window" />
+          </label>
+
+          <button className="analysis-btn">Run Analysis</button>
+        </div>
+      </section>
+
+      <section className="panel risk-results">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">RISK ASSESSMENT OUTPUT</p>
+            <h2>Analysis Results</h2>
+          </div>
+        </div>
+
+        <EmptyState message="No risk analysis available" />
+      </section>
+    </div>
+  );
+}
+
+function PropagationPage() {
+  return (
+    <div className="propagation-page">
+      <section className="panel propagation-config">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">ORBITAL PROPAGATION SYSTEM</p>
+            <h2>Propagation</h2>
+          </div>
+        </div>
+
+        <div className="propagation-form">
+          <label>
+            <span>OBJECT SOURCE</span>
+            <select defaultValue="">
+              <option value="" disabled>
+                Select object source
+              </option>
+              <option value="catalog">Object Catalog</option>
+              <option value="screening">Screening Results</option>
+            </select>
+          </label>
+
+          <label>
+            <span>PROPAGATION MODEL</span>
+            <select defaultValue="">
+              <option value="" disabled>
+                Select propagation model
+              </option>
+              <option value="sgp4">SGP4</option>
+              <option value="custom">Custom Model</option>
+            </select>
+          </label>
+
+          <label>
+            <span>TIME RANGE</span>
+            <input type="text" placeholder="Enter propagation window" />
+          </label>
+
+          <button className="propagation-btn">Run Propagation</button>
+        </div>
+      </section>
+
+      <section className="panel propagation-output">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">PROPAGATION OUTPUT</p>
+            <h2>Orbital State</h2>
+          </div>
+        </div>
+
+        <EmptyState message="No propagation data available" />
+      </section>
+    </div>
+  );
+}
+
+function SettingsPage() {
+  return (
+    <div className="settings-page">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">APPLICATION PREFERENCES</p>
+            <h2>Preferences</h2>
+          </div>
+        </div>
+
+        <div className="settings-list">
+          <div className="setting-row">
+            <div>
+              <strong>Automatic Refresh</strong>
+              <small>
+                Automatically refresh data when connected to the backend.
+              </small>
+            </div>
+
+            <button className="toggle" aria-label="Automatic refresh">
+              <span />
+            </button>
+          </div>
+
+          <div className="setting-row">
+            <div>
+              <strong>Notifications</strong>
+              <small>
+                Receive notifications for important system events.
+              </small>
+            </div>
+
+            <button className="toggle" aria-label="Notifications">
+              <span />
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function EmptyModule({ title }: { title: string }) {
   return (
     <section className="panel placeholder">
       <p className="eyebrow">PERIGEE MODULE</p>
       <h2>{title}</h2>
-
       <EmptyState message="No data available" />
     </section>
   );
