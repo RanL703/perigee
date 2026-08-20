@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Satellite conjunction-risk triage assistant"
 requires-python = ">=3.12"
 dependencies = [
+  "asyncpg>=0.30,<1",
   "httpx>=0.28,<1",
   "sgp4>=2.24,<3",
 ]

@@ -37,3 +37,10 @@ class RiskConfig:
     trend_weight: float = _float("RISK_TREND_WEIGHT", 10.0)
     critical_threshold: float = _float("RISK_CRITICAL_THRESHOLD", 75.0)
     elevated_threshold: float = _float("RISK_ELEVATED_THRESHOLD", 40.0)
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseConfig:
+    url: str = getenv(
+        "DATABASE_URL", "postgresql://perigee:perigee-local-dev@127.0.0.1:5432/perigee"
+    )
