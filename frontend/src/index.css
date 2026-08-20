@@ -1065,3 +1065,164 @@ button:focus-visible {
     flex-wrap: wrap;
   }
 }
+/* OBJECTS PAGE */
+
+.objects-panel {
+  margin-top: 26px;
+  overflow: hidden;
+}
+
+.object-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid #151e2b;
+  border-bottom: 1px solid #151e2b;
+}
+
+.object-summary > div {
+  padding: 20px 23px;
+  border-right: 1px solid #151e2b;
+}
+
+.object-summary > div:last-child {
+  border-right: 0;
+}
+
+.object-summary span {
+  display: block;
+  color: #56657b;
+  font-family: monospace;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+.object-summary strong {
+  display: block;
+  margin-top: 10px;
+  color: #dfe8f7;
+  font-family: monospace;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.object-head {
+  color: #455167;
+  font-family: monospace;
+  font-size: 7px;
+  letter-spacing: 1px;
+  border-top: 0;
+}
+
+.placeholder {
+  margin-top: 26px;
+  min-height: 400px;
+  padding: 30px;
+}
+
+.placeholder h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.placeholder p:last-child {
+  color: #59667a;
+  font-size: 11px;
+}
+
+@media (max-width: 800px) {
+  .object-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .object-summary > div:nth-child(2) {
+    border-right: 0;
+  }
+}
+/* SCREENING */
+
+.screening-page {
+  margin-top: 26px;
+  display: grid;
+  gap: 14px;
+}
+
+.screening-config,
+.screening-results {
+  overflow: hidden;
+}
+
+.screening-form {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  padding: 0 23px 23px;
+}
+
+.screening-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.screening-form label span {
+  color: #53627a;
+  font-family: monospace;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+
+.screening-form input,
+.screening-form select {
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid #202d41;
+  border-radius: 6px;
+  outline: none;
+  background: #090f17;
+  color: #9aa9bf;
+  font-family: inherit;
+  font-size: 10px;
+}
+
+.screening-form input::placeholder {
+  color: #3f4c60;
+}
+
+.screening-form input:focus,
+.screening-form select:focus {
+  border-color: #385786;
+}
+
+.screening-btn {
+  align-self: end;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid #34568d;
+  border-radius: 6px;
+  background: #10203a;
+  color: #9dbbff;
+  font-family: inherit;
+  font-size: 9px;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.screening-btn:hover {
+  background: #162b4b;
+  border-color: #5279b8;
+}
+
+.screening-results .empty-state {
+  min-height: 260px;
+}
+
+@media (max-width: 800px) {
+  .screening-form {
+    grid-template-columns: 1fr;
+  }
+
+  .screening-btn {
+    width: 100%;
+  }
+}
