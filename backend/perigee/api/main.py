@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from os import getenv
@@ -14,6 +16,22 @@ from perigee.persistence.repository import PerigeeRepository
 from perigee.services.refresh import AppState, start_refresh
 
 
+async def _warm_ollama(config: OllamaConfig) -> None:
+    """Preload model weights so the first analyst question doesn't cold-start."""
+    if not config.enabled:
+        return
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            await client.post(
+                f"{config.base_url}/api/generate",
+                json={"model": config.model, "prompt": "ok", "keep_alive": "30m"},
+            )
+    except Exception as exc:  # noqa: BLE001 - optional provider must fail soft
+        logger.debug("Ollama warmup skipped: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     repository = PerigeeRepository(DatabaseConfig().url)
@@ -25,6 +43,7 @@ async def lifespan(app: FastAPI):
         agent_features=AgentFeatures(ollama_config),
     )
     app.state.perigee = state
+    asyncio.create_task(_warm_ollama(ollama_config))
     scheduler = AsyncIOScheduler(timezone=UTC)
     # Reinstate live data as soon as the stack boots (skipped gracefully by the
     # cached fallback if CelesTrak is unreachable), then keep re-screening on
@@ -52,6 +71,8 @@ async def lifespan(app: FastAPI):
             state.active_task.cancel()
         await repository.close()
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Perigee Conjunction Triage API",

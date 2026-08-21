@@ -74,8 +74,28 @@ def test_agent_payload_forbids_extra_fields() -> None:
 
 def test_agent_guardrail_rejects_operational_language() -> None:
     try:
-        AgentFeatures._validate_text("Approve the avoidance maneuver now")
+        AgentFeatures._validate_text("You should perform an avoidance maneuver now")
     except ValueError:
         pass
     else:
         raise AssertionError("agent guardrail accepted operational advice")
+
+
+def test_guardrails_allow_advisory_discussion_of_measures() -> None:
+    text = (
+        "Analysts can monitor the next screening cycle and validate TLE freshness for both objects. "
+        "If the miss distance keeps shrinking, a human review could consider whether any operational "
+        "response is warranted, but that decision belongs to operators."
+    )
+    sanitized = AgentFeatures._validate_text(text)
+    assert "monitor the next screening cycle" in sanitized
+    assert "human review" in sanitized
+
+
+def test_guardrails_still_block_probability_figures() -> None:
+    try:
+        AgentFeatures._validate_text("There is roughly a 73% chance of collision based on these numbers.")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("agent guardrail accepted a probability figure")

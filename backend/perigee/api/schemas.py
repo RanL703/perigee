@@ -125,8 +125,14 @@ class ExplainResponse(BaseModel):
     provider_error: str | None = None
 
 
+class HistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=1500)
+
+
 class AgentQueryRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=8)
 
 
 class AgentQueryResponse(BaseModel):

@@ -1,5 +1,10 @@
 # Perigee
 
+<div align="center">
+  <img src="./perigeelogo.jpg" alt="Perigee — Intelligent Satellite Conjunction Risk Triage" width="640" />
+</div>
+
+
 Perigee is a satellite conjunction triage dashboard. It ingests public CelesTrak GP data, stores normalized orbital objects in PostgreSQL, propagates them with SGP4, scores close approaches deterministically, and exposes the results through a FastAPI REST/WebSocket backend. A local Ollama `qwen3.5:9b` layer adds read-only explanations and analyst assistance; it never changes the physics or risk score.
 
 ## Demo architecture
@@ -100,6 +105,7 @@ Expected behavior:
 | GET | `/api/config` | Screening window/thresholds and risk weights/cutoffs |
 | POST | `/api/refresh` | Asynchronous ingest + screen job |
 | POST | `/api/agent/query` | Read-only Ask Perigee query |
+| POST | `/api/agent/query/stream` | Same query with SSE delta streaming |
 | GET | `/api/agent/insights` | Read-only descriptive event insights |
 | WS | `/ws/events` | Refresh and event lifecycle messages |
 
@@ -292,11 +298,12 @@ demo dataset so the dashboard always has a tiered picture to present:
 .venv/bin/python backend/scripts/seed_demo_events.py
 ```
 
-This inserts six valid-TLE objects and three demo conjunctions — one per risk tier, including
-the critical `SENTINEL-6A × FENGYUN 1C DEB` alert with a worsening trend. The approach geometry
-is fabricated on purpose (demo safety net); every score, tier, factor breakdown and trend is
-still produced by the real deterministic scoring engine applied to that geometry. Seeded events
-survive refresh cycles because refresh only upserts newly detected pairs.
+This inserts eleven valid-TLE objects and eight demo conjunctions spread across all three risk
+tiers (2 critical / 3 elevated / 3 low), including the critical `SENTINEL-6A × FENGYUN 1C DEB`
+alert with a worsening trend. The approach geometry is fabricated on purpose (demo safety net);
+every score, tier, factor breakdown and trend is still produced by the real deterministic
+scoring engine applied to that geometry. Seeded events survive refresh cycles because refresh
+only upserts newly detected pairs.
 
 ### Common install issues
 

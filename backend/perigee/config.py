@@ -59,4 +59,4 @@ class OllamaConfig:
     enabled: bool = getenv("OLLAMA_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     base_url: str = getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     model: str = getenv("OLLAMA_MODEL", "qwen3.5:9b")
-    timeout_seconds: float = _float("OLLAMA_TIMEOUT_SECONDS", 20.0)
+    timeout_seconds: float = _float("OLLAMA_TIMEOUT_SECONDS", 75.0)

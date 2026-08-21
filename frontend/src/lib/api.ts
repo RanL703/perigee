@@ -94,7 +94,50 @@ export const api = {
   event: (id: string) => request<EventDetail>(`/api/events/${id}`),
   explain: (id: string) => request<Explain>(`/api/events/${id}/explain`, { method: "POST" }),
   recommendation: (id: string) => request<Recommendation>(`/api/events/${id}/recommendation`),
-  query: (question: string) => request<QueryResult>("/api/agent/query", { method: "POST", body: JSON.stringify({ question }) }),
+  query: (question: string, history: { role: "user" | "assistant"; content: string }[] = []) =>
+    request<QueryResult>("/api/agent/query", { method: "POST", body: JSON.stringify({ question, history }) }),
+  queryStream: async (
+    question: string,
+    history: { role: "user" | "assistant"; content: string }[],
+    onDelta: (text: string) => void,
+  ): Promise<{ answer: string; source: "ollama" | "template"; referencedEventIds: string[] }> => {
+    const response = await fetch(`${API_BASE}/api/agent/query/stream`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ question, history }),
+    });
+    if (!response.ok || !response.body) throw new Error(`${response.status}: ${await response.text()}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let answer = "";
+    let source: "ollama" | "template" = "template";
+    let referencedEventIds: string[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+      for (const event of events) {
+        const line = event.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = JSON.parse(line.slice(5).trim()) as
+          | { type: "start" }
+          | { type: "delta"; text: string }
+          | { type: "done"; source: "ollama" | "template"; referenced_event_ids: string[] };
+        if (payload.type === "delta") {
+          answer += payload.text;
+          onDelta(payload.text);
+        }
+        if (payload.type === "done") {
+          source = payload.source;
+          referencedEventIds = [...new Set(payload.referenced_event_ids)];
+        }
+      }
+    }
+    return { answer, source, referencedEventIds };
+  },
   insights: () => request<Insights>("/api/agent/insights"),
   refresh: () => request<{ job_id: string; status: string; message: string }>("/api/refresh", { method: "POST" }),
   objects: (search = "", limit = 200) =>

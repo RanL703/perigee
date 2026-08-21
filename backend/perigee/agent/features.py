@@ -28,16 +28,28 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 PayloadT = TypeVar("PayloadT", bound=BaseModel)
 
-QUERY_PROMPT = """You are Ask Perigee, a read-only analyst assistant.
-Use only the dashboard context returned by get_dashboard_context, which contains the
-screening stats (stats) and every currently flagged conjunction event (events, pre-sorted
-by risk score descending). You can: summarize the whole screening picture, name the most
-urgent alert, rank or compare events, filter by risk tier or object type (payload/debris/
-rocket body), find the closest pass or highest relative velocity, count events matching a
-condition, and describe any single event in the list. Answer the user's question directly
-and briefly using those facts. Never invent records, numbers, timestamps, or event IDs;
-if the context is insufficient, say exactly that you do not have enough information.
-Do not claim collision probability, operational certainty, or recommend maneuvers.
+QUERY_PROMPT = """You are Ask Perigee, a read-only analyst assistant for satellite conjunction screening.
+Tools:
+- get_dashboard_context: screening stats, the conversation so far, and every currently
+  flagged conjunction event (pre-sorted by risk score descending).
+- search_catalog: look up ANY tracked object by name substring — flagged or not — for its
+  NORAD ID and type. Use it whenever the question mentions an object that is not in the
+  flagged events.
+
+You can: summarize the whole screening picture; name the most urgent alert; rank, compare,
+or filter events by risk tier or object type (payload/debris/rocket body); describe any
+flagged event; report whether a specific object is or is not involved in any flagged event;
+and discuss what measures an analyst could take next — monitoring, verification, review
+priorities, and what information would be worth gathering. Stay on the topic of orbital
+screening and space safety.
+
+Ground every fact in tool output; never invent records, numbers, timestamps, or event IDs;
+if the tools are insufficient, say exactly that you do not have enough information.
+Advisory boundary: never state a numeric collision-probability figure and never direct
+anyone to execute a maneuver or command; describing options for human review is fine.
+Never announce which tools you called, never ask clarifying questions, and never request
+more information from the user — after the tool call(s), immediately emit the structured
+response that answers the analyst's question.
 Return only the requested structured response. Referenced IDs must be copied exactly.
 """
 
@@ -63,12 +75,16 @@ class AgentFeatures:
     def __init__(self, config: OllamaConfig) -> None:
         self.config = config
 
-    def _model(self) -> ChatOllama:
+    def _model(self, num_predict: int | None = None) -> ChatOllama:
         return ChatOllama(
             model=self.config.model,
             base_url=self.config.base_url,
             temperature=0,
             reasoning=False,
+            num_predict=num_predict,
+            # Keep weights resident between demo questions; a cold reload was
+            # causing the first query of a session to time out and fall back.
+            keep_alive="30m",
             timeout=self.config.timeout_seconds,
         )
 
@@ -80,23 +96,47 @@ class AgentFeatures:
         tool_name: str,
         *,
         user_message: str | None = None,
+        num_predict: int | None = None,
     ) -> PayloadT:
-        facts_json = json.dumps(facts, default=str, separators=(",", ":"))
+        catalog = facts.get("catalog") or []
 
         @tool
-        def read_context() -> str:
-            """Return the explicitly scoped, read-only API context."""
-            return facts_json
+        def get_dashboard_context() -> str:
+            """Return the explicitly scoped, read-only screening context."""
+            return json.dumps(
+                {key: value for key, value in facts.items() if key != "catalog"},
+                default=str,
+                separators=(",", ":"),
+            )
+
+        tools = [get_dashboard_context]
+        if catalog:
+            @tool
+            def search_catalog(query: str) -> str:
+                """Find tracked objects by name substring (any object, flagged or not)."""
+                needle = query.lower().strip()
+                matches = [
+                    {"norad_id": obj["norad_id"], "name": obj["name"], "object_type": str(obj.get("object_type", ""))}
+                    for obj in catalog
+                    if needle in str(obj.get("name", "")).lower()
+                ][:10]
+                return json.dumps({"matches": len(matches), "objects": matches})
+
+            tools.append(search_catalog)
 
         agent = create_agent(
-            model=self._model(),
-            tools=[read_context],
+            model=self._model(num_predict),
+            tools=tools,
             system_prompt=prompt,
             response_format=schema,
         )
-        base_message = user_message or "Use the read-only context now. Return only the requested schema."
+        base_message = (
+            user_message
+            or "Use the read-only context now, then immediately emit the requested structured response."
+        )
+        retry_message = f"{base_message}\nRETRY: your previous output was invalid — call the needed tool(s), then emit only valid structured output with no extra fields or prose."
         last_error: Exception | None = None
-        for instruction in (base_message, "RETRY: the previous response was invalid. Call the context tool, then emit only valid structured output with no extra fields or prose."):
+        for instruction in (base_message, retry_message):
             try:
                 result = agent.invoke(
                     {"messages": [{"role": "user", "content": instruction}]},
@@ -144,15 +184,15 @@ class AgentFeatures:
                     return schema.model_validate(data)
                 except ValueError:
                     continue
-        # Schemas with exactly one required string field (query answers,
-        # recommendations) accept grounded prose directly; guardrail
-        # sanitisation still applies afterwards.
-        string_fields = [
-            name for name, field in schema.model_fields.items() if field.annotation is str
+        # Schemas whose only REQUIRED field is a single string (query answers
+        # with optional referenced IDs, recommendations) accept grounded prose
+        # directly; guardrail sanitisation still applies afterwards.
+        required_fields = [
+            name for name, field in schema.model_fields.items() if field.is_required()
         ]
-        if len(string_fields) == 1 and len(schema.model_fields) == 1 and text:
+        if len(required_fields) == 1 and schema.model_fields[required_fields[0]].annotation is str and text:
             try:
-                return schema.model_validate({string_fields[0]: text})
+                return schema.model_validate({required_fields[0]: text})
             except ValueError:
                 return None
         return None
@@ -173,16 +213,30 @@ class AgentFeatures:
         return ids
 
     async def query(self, question: str, context: dict[str, Any]) -> AgentQueryResponse:
+        history = context.get("history") or []
+        history_text = "\n".join(
+            f"{'User' if turn.get('role') == 'user' else 'Perigee'}: {turn.get('content', '')}"
+            for turn in history[-6:]
+        )
+        user_message = (
+            f"Analyst question: {question}\n"
+            + (f"Conversation so far:\n{history_text}\n" if history_text else "")
+            + "Call the tools you need, then immediately emit the structured response answering the question above. Do not ask for clarification and do not describe your tools."
+        )
+        facts = {"question": question, **context}
         if not self.config.enabled:
-            return self._deterministic_query(question, context, provider_error=None)
+            return self._deterministic_query(question, facts, provider_error=None)
         try:
-            payload = await asyncio.wait_for(asyncio.to_thread(self._run, {"question": question, **context}, QUERY_PROMPT, AgentQueryPayload, "get_dashboard_context", user_message=f"Analyst question: {question}\nUse the read-only context tool, then answer it from that data only."), self.config.timeout_seconds + 5)
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(self._run, facts, QUERY_PROMPT, AgentQueryPayload, "get_dashboard_context", user_message=user_message, num_predict=700),
+                self.config.timeout_seconds + 5,
+            )
             answer = self._validate_text(payload.answer)
-            referenced = self._validate_ids(payload.referenced_event_ids)
+            referenced = list(dict.fromkeys(self._validate_ids(payload.referenced_event_ids)))
             return AgentQueryResponse(answer=answer, referenced_event_ids=referenced, source="ollama", model=self.config.model)
         except Exception as exc:  # noqa: BLE001 - optional provider must fail soft
-            logger.warning("Ask Perigee unavailable: %s", exc)
-            return self._deterministic_query(question, context, provider_error=str(exc))
+            logger.warning("Ask Perigee unavailable: %s", str(exc) or type(exc).__name__)
+            return self._deterministic_query(question, facts, provider_error=str(exc) or type(exc).__name__)
 
     @staticmethod
     def _deterministic_query(question: str, context: dict[str, Any], *, provider_error: str | None) -> AgentQueryResponse:
@@ -202,6 +256,18 @@ class AgentFeatures:
 
         def label(event: dict[str, Any]) -> str:
             return f"{event['object_a_name']} × {event['object_b_name']}"
+
+        # Catalog lookup for objects that may not be part of any flagged event.
+        for obj in context.get("catalog") or []:
+            name = str(obj.get("name", ""))
+            if len(name) > 3 and name.lower() in lowered:
+                involved = [event for event in events if name in (str(event["object_a_name"]), str(event["object_b_name"]))]
+                kind = str(obj.get("object_type", "")).replace("_", " ")
+                if involved:
+                    answer = f"{name} ({kind}, NORAD {obj['norad_id']}) appears in {len(involved)} flagged event(s): " + "; ".join(f"{label(event)} ({event['risk_tier']}, score {float(event['risk_score']):.0f})" for event in involved[:3]) + "."
+                else:
+                    answer = f"{name} ({kind}, NORAD {obj['norad_id']}) is tracked in the catalog but is not involved in any of the {len(events)} currently flagged close approaches."
+                return AgentQueryResponse(answer=answer, referenced_event_ids=[str(event["id"]) for event in involved[:1]], source="template", model=AgentFeatures._model_name(context), provider_error=provider_error)
 
         if any(term in lowered for term in ("debris", "payload", "rocket")):
             kind = next((term for term in ("debris", "payload", "rocket") if term in lowered), "debris")

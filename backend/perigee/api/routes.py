@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi.responses import StreamingResponse
 
 from perigee.agent.schemas import AgentExplanationResponse
 from perigee.api.schemas import (
@@ -170,20 +171,68 @@ async def explain_event(request: Request, event_id: UUID) -> ExplainResponse:
     return ExplainResponse(**result.model_dump())
 
 
+async def _agent_context(state, payload: AgentQueryRequest) -> dict[str, object]:
+    """Shared read-only context for the plain and streaming query endpoints."""
+    stats_row = await state.repository.stats()
+    events = await state.repository.agent_event_context()
+    catalog = await state.repository.list_objects(search=None, limit=500)
+    return {
+        "stats": dict(stats_row),
+        "events": events,
+        "model": state.agent_features.config.model,
+        "history": [turn.model_dump() for turn in payload.history],
+        # Compact catalog snapshot so the agent can look up any tracked
+        # object — flagged or not — without extra database round-trips.
+        "catalog": [
+            {"norad_id": int(row["norad_id"]), "name": str(row["name"]), "object_type": str(row["object_type"])}
+            for row in catalog
+        ],
+    }
+
+
 @router.post("/agent/query", response_model=AgentQueryResponse)
 async def agent_query(request: Request, payload: AgentQueryRequest) -> AgentQueryResponse:
     state = _state(request)
     if state.agent_features is None:
         raise HTTPException(status_code=503, detail="Agent features are not configured")
-    stats_row = await state.repository.stats()
-    events = await state.repository.agent_event_context()
-    context = {
-        "stats": dict(stats_row),
-        "events": events,
-        "model": state.agent_features.config.model,
-    }
+    context = await _agent_context(state, payload)
     result = await state.agent_features.query(payload.question, context)
     return AgentQueryResponse(**result.model_dump())
+
+
+@router.post("/agent/query/stream")
+async def agent_query_stream(request: Request, payload: AgentQueryRequest) -> StreamingResponse:
+    state = _state(request)
+    if state.agent_features is None:
+        raise HTTPException(status_code=503, detail="Agent features are not configured")
+    context = await _agent_context(state, payload)
+
+    async def event_stream():
+        yield f"data: {json.dumps({'type': 'start'})}\n\n"
+        result = await state.agent_features.query(payload.question, context)
+        # The grounded answer is validated first; it is then released in small
+        # paced chunks so the chat box renders progressively like a live model.
+        words = result.answer.split(" ")
+        chunk = ""
+        for index, word in enumerate(words):
+            chunk += (" " if chunk else "") + word
+            if len(chunk) >= 28 or index == len(words) - 1:
+                yield f"data: {json.dumps({'type': 'delta', 'text': chunk})}\n\n"
+                chunk = ""
+                await asyncio.sleep(0.025)
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "done",
+                    "source": result.source,
+                    "referenced_event_ids": result.referenced_event_ids,
+                }
+            )
+            + "\n\n"
+        )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/events/{event_id}/recommendation", response_model=RecommendationResponse)

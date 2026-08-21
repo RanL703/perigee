@@ -269,7 +269,26 @@ POST /api/refresh             -> completed; junk co-orbital events did not retur
 - Playwright verification: 15 checks PASS, zero console errors; pytest 12 passed; ruff clean;
   lint/build clean.
 
+## Session 2026-08-21c — agent freedom, catalog scope, chat memory
+
+- Guardrails relaxed to directive-pattern matching: advisory discussion of measures/review
+  actions passes through; only numeric probability figures, machine commands, and sentences
+  directing a maneuver are removed (`guardrails.py` rewritten).
+- Ask Perigee no longer dashboard-bound: `search_catalog` tool filters an in-memory snapshot
+  of all tracked objects (flagged or not); `agent_event_context` includes object types;
+  `/api/agent/query` accepts `history` turns for follow-up questions.
+- False fallbacks fixed: tool renamed to match prompt (`get_dashboard_context`), prose
+  coercion handles schemas whose only *required* field is a string (AgentQueryPayload),
+  retry message retains the question, num_predict=700, OLLAMA_TIMEOUT default 75s,
+  keep_alive="30m", boot-time Ollama warmup in lifespan.
+- Chat: module-level store `lib/chat.ts` keeps the conversation across page switches;
+  AgentPanel renders a transcript with per-turn source labels and sends last 6 turns as
+  history; UI retries once silently before ever tagging a turn as deterministic fallback.
+- Playwright: UI question → ollama answer without fallback tag; follow-up uses history;
+  chat survives navigation; zero page errors. pytest 14 passed.
+
 ## Quick resume command block
+
 
 
 

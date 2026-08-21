@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   type Config,
   type EventDetail,
   type EventSummary,
-  type Insights,
   type ObjectListItem,
   type PropagatedObject,
-  type QueryResult,
   type Stats,
   websocketUrl,
 } from "./lib/api";
 import "./App.css";
+import { Markdown } from "./lib/markdown";
+import { chatStore, useChat } from "./lib/chat";
 import { settingsStore, useSettings } from "./lib/settings";
 
 type Page = "Dashboard" | "Objects" | "Screening" | "Risk Analysis" | "Propagation" | "Settings";
@@ -684,24 +684,57 @@ const QUICK_PROMPTS = [
 
 function AgentPanel({ events, onSelect }: { events: EventSummary[]; onSelect: (id: string) => void }) {
   const [question, setQuestion] = useState("");
-  const [result, setResult] = useState<QueryResult | null>(null);
-  const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stream, setStream] = useState<{ question: string; answer: string } | null>(null);
+  const turns = useChat();
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const lastTurn = turns[turns.length - 1];
 
   const ask = async (prompt: string) => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || loading) return;
     setLoading(true);
+    setStream({ question: prompt, answer: "" });
     try {
-      setResult(await api.query(prompt));
+      const run = () => api.queryStream(prompt, chatStore.history(), (text) => {
+        setStream((previous) => (previous ? { ...previous, answer: previous.answer + text } : previous));
+      });
+      let result = await run();
+      // A single transparent retry avoids tagging a question as a
+      // deterministic fallback just because the local model was cold.
+      if (result.source === "template" && result.referencedEventIds.length === 0) {
+        setStream({ question: prompt, answer: "" });
+        const retry = await run();
+        if (retry.source !== "template" || retry.answer !== result.answer) result = retry;
+      }
+      chatStore.add({
+        question: prompt,
+        answer: result.answer,
+        source: result.source,
+        referencedEventIds: result.referencedEventIds,
+      });
+      setQuestion("");
+    } catch {
+      // Network failure: fall back to the non-streaming path so the
+      // conversation still records a grounded answer.
+      const fallbackResult = await api.query(prompt, chatStore.history());
+      chatStore.add({
+        question: prompt,
+        answer: fallbackResult.answer,
+        source: fallbackResult.source,
+        referencedEventIds: [...new Set(fallbackResult.referenced_event_ids)],
+      });
+      setQuestion("");
     } finally {
       setLoading(false);
+      setStream(null);
     }
   };
 
   useEffect(() => {
-    void api.insights().then(setInsights).catch(() => undefined);
-  }, []);
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
+  }, [turns.length, loading]);
 
+  const badge = lastTurn ? (lastTurn.source === "template" ? "local fallback ready" : "local qwen3.5:9b") : "local qwen3.5:9b";
   return (
     <section className="panel agent-panel">
       <div className="panel-header">
@@ -709,8 +742,42 @@ function AgentPanel({ events, onSelect }: { events: EventSummary[]; onSelect: (i
           <p className="eyebrow">AI-ASSISTED · READ ONLY</p>
           <h2>Ask Perigee</h2>
         </div>
-        <span className="data-badge">{result?.source ?? "local qwen3.5:9b"}</span>
+        <span className="data-badge">{badge}</span>
       </div>
+      {(turns.length > 0 || stream) && (
+        <div className="chat-thread" ref={threadRef} aria-label="Ask Perigee conversation">
+          {turns.map((turn, index) => (
+            <div className="chat-turn" key={index}>
+              <p className="chat-question">{turn.question}</p>
+              <div className="chat-answer">
+                <small>AI-assisted{turn.source === "template" ? " · deterministic fallback" : ""}</small>
+                <div className="md-body">
+                  <Markdown text={turn.answer} />
+                </div>
+                {turn.referencedEventIds.map((id) => (
+                  <button key={id} className="link-btn" onClick={() => onSelect(id)}>
+                    Open referenced event
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {stream && (
+            <div className="chat-turn">
+              <p className="chat-question">{stream.question}</p>
+              <div className="chat-answer chat-answer-streaming">
+                {stream.answer ? (
+                  <div className="md-body">
+                    <Markdown text={stream.answer} />
+                  </div>
+                ) : (
+                  <small className="muted-copy">Thinking with the local model…</small>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <div className="agent-query">
         <input
           value={question}
@@ -718,7 +785,7 @@ function AgentPanel({ events, onSelect }: { events: EventSummary[]; onSelect: (i
           onKeyDown={(event) => {
             if (event.key === "Enter") void ask(question);
           }}
-          placeholder="Ask anything about the current screening results…"
+          placeholder={turns.length ? "Ask a follow-up…" : "Ask anything about tracked objects or flagged events…"}
           aria-label="Ask Perigee a question"
         />
         <button className="outline-btn" onClick={() => void ask(question)} disabled={loading}>
@@ -727,40 +794,24 @@ function AgentPanel({ events, onSelect }: { events: EventSummary[]; onSelect: (i
       </div>
       <div className="agent-chips">
         {QUICK_PROMPTS.map((prompt) => (
-          <button key={prompt} className="chip" disabled={loading} onClick={() => {
-            setQuestion(prompt);
-            void ask(prompt);
-          }}>
+          <button
+            key={prompt}
+            className="chip"
+            disabled={loading}
+            onClick={() => void ask(prompt)}
+          >
             {prompt}
           </button>
         ))}
       </div>
-      {result && (
-        <div className="agent-answer">
-          <small>AI-assisted answer{result.source === "template" ? " · deterministic fallback" : ` · ${result.model}`}</small>
-          <strong>{result.answer}</strong>
-          {result.provider_error && <small>Fallback used: {result.provider_error}</small>}
-          {result.referenced_event_ids.length > 0 && result.referenced_event_ids.map((id) => (
-            <button key={id} className="link-btn" onClick={() => onSelect(id)}>
-              Open referenced event
-            </button>
-          ))}
-        </div>
-      )}
-      {insights?.insights.length ? (
-        <div className="insight-list">
-          <small>AI-assisted observations</small>
-          {insights.insights.map((insight) => (
-            <p key={insight.observation}>◈ {insight.observation}</p>
-          ))}
-        </div>
-      ) : (
-        events.length === 0 && <small className="muted-copy">AI observations will appear when the deterministic screen records events.</small>
+      {events.length === 0 && (
+        <small className="muted-copy agent-note">
+          Ask Perigee can look up any tracked object once a screening cycle has run.
+        </small>
       )}
     </section>
   );
 }
-
 function TrendSparkline({ points }: { points: EventDetail["trend_history"] }) {
   if (points.length < 2) return null;
   const scores = points.map((point) => point.risk_score);

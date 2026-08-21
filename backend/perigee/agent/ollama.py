@@ -101,6 +101,7 @@ class OllamaAssistant:
             # Qwen exposes a thinking mode that is useful for open-ended chat but
             # adds avoidable latency to this bounded, structured explanation call.
             reasoning=False,
+            keep_alive="30m",
             timeout=self.config.timeout_seconds,
         )
         agent = create_agent(

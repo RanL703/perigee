@@ -1326,3 +1326,23 @@ button.table-row span { overflow: hidden; text-overflow: ellipsis; white-space: 
 .backend-panel-header { margin-top: 26px; border-top: 1px solid #151e2b; padding-top: 18px; }
 .config-note { display: block; margin: -6px 23px 16px; }
 .settings-config-grid { margin-bottom: 26px; }
+
+/* Ask Perigee conversation thread */
+.chat-thread { display: grid; gap: 14px; max-height: 340px; margin: 0 23px 16px; overflow-y: auto; }
+.chat-turn { display: grid; gap: 8px; }
+.chat-question { margin: 0; padding-left: 10px; border-left: 2px solid #263953; color: #a5b9d8; font-size: 11px; font-style: italic; }
+.chat-answer { display: grid; gap: 6px; margin-left: 14px; padding: 12px 14px; border-left: 2px solid #6f9cff; background: rgba(47, 77, 132, .14); color: #c8d5ea; font-size: 12px; line-height: 1.6; }
+.chat-answer small { color: #77869b; font: 9px "DM Mono", monospace; text-transform: uppercase; }
+.chat-answer strong { color: #eaf1fc; font-weight: 500; line-height: 1.55; }
+.chat-thinking { margin: -6px 0 0 37px; animation: toast-in .3s ease; }
+.agent-note { display: block; margin: -6px 23px 16px; }
+
+/* Rendered markdown in chat answers */
+.md-body { display: grid; gap: 8px; }
+.md-body p, .md-body ul, .md-body ol { margin: 0; }
+.md-body ul, .md-body ol { display: grid; gap: 4px; padding-left: 18px; }
+.md-body strong { color: #f0f6ff; font-weight: 600; }
+.md-body em { color: #b7c6de; }
+.md-body code { padding: 1px 5px; background: rgba(38, 57, 83, .5); font-family: "DM Mono", monospace; font-size: 11px; }
+.md-heading { display: block; color: #eaf1fc; font-size: 12px; letter-spacing: .02em; }
+
