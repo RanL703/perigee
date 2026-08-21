@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from os import getenv
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -26,6 +26,16 @@ async def lifespan(app: FastAPI):
     )
     app.state.perigee = state
     scheduler = AsyncIOScheduler(timezone=UTC)
+    # Reinstate live data as soon as the stack boots (skipped gracefully by the
+    # cached fallback if CelesTrak is unreachable), then keep re-screening on
+    # the configured interval.
+    scheduler.add_job(
+        start_refresh,
+        "date",
+        run_date=datetime.now(UTC) + timedelta(seconds=10),
+        args=[state],
+        id="startup-refresh",
+    )
     scheduler.add_job(
         start_refresh,
         "interval",

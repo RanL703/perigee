@@ -1311,3 +1311,18 @@
 button.table-row { width: 100%; padding: 12px 23px; border: 0; border-top: 1px solid #151e2b; background: transparent; color: #93a3ba; font-size: 10px; text-align: left; cursor: pointer; }
 button.table-row:hover { background: #111b2a; }
 button.table-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Settings controls + toasts */
+.toggle { position: relative; width: 46px; height: 24px; border: 1px solid #263953; background: #0d1724; cursor: pointer; transition: border-color .2s, background .2s; }
+.toggle span { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: #5b6c85; transition: left .2s, background .2s; }
+.toggle-on { border-color: #3d67a1; background: #132440; }
+.toggle-on span { left: 25px; background: #91b4ed; }
+.setting-select { padding: 9px 11px; border: 1px solid #263953; background: #080e17; color: #e9eef8; font-size: 12px; }
+.toast { position: fixed; right: 20px; bottom: 20px; z-index: 300; max-width: min(420px, calc(100vw - 40px)); padding: 13px 16px; border: 1px solid #3d67a1; background: rgba(19, 36, 64, .96); color: #cddcf5; font-size: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); animation: toast-in .3s ease; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.compact-tables button.table-row, .compact-tables .table-row { padding-top: 6px; padding-bottom: 6px; }
+.compact-tables .event-row { padding-top: 7px; padding-bottom: 7px; }
+.compact-tables .factor-bar { margin: 3px 0; }
+.backend-panel-header { margin-top: 26px; border-top: 1px solid #151e2b; padding-top: 18px; }
+.config-note { display: block; margin: -6px 23px 16px; }
+.settings-config-grid { margin-bottom: 26px; }

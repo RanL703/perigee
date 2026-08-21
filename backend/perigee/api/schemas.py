@@ -84,9 +84,15 @@ class RiskConfigResponse(BaseModel):
     elevated_threshold: float
 
 
+class AiConfigResponse(BaseModel):
+    enabled: bool
+    model: str
+
+
 class ConfigResponse(BaseModel):
     screening: ScreeningConfigResponse
     risk: RiskConfigResponse
+    ai: AiConfigResponse
 
 
 class StatsResponse(BaseModel):

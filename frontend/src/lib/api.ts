@@ -77,7 +77,8 @@ export type RiskConfig = {
   critical_threshold: number;
   elevated_threshold: number;
 };
-export type Config = { screening: ScreeningConfig; risk: RiskConfig };
+export type AiConfig = { enabled: boolean; model: string };
+export type Config = { screening: ScreeningConfig; risk: RiskConfig; ai: AiConfig };
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 

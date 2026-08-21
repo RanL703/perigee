@@ -232,6 +232,7 @@ class PerigeeRepository:
 
     async def agent_event_context(self, limit: int = 25) -> list[dict[str, object]]:
         query = """SELECT e.id, a.name AS object_a_name, b.name AS object_b_name,
+                          a.object_type AS object_a_type, b.object_type AS object_b_type,
                           e.risk_score, e.risk_tier, e.miss_distance_km,
                           e.relative_velocity_kmps, e.tca, e.screened_at
                    FROM conjunction_events e

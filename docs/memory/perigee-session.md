@@ -254,7 +254,23 @@ explain/recommendation        -> source "ollama"
 POST /api/refresh             -> completed; junk co-orbital events did not return
 ```
 
+## Session 2026-08-21b — richer demo board, settings controls, auto-refresh
+
+- Seed expanded to 8 fabricated events across tiers (2 critical 84/79, 3 elevated 65/59/54,
+  3 low 40/39/30) over 11 objects; scores still from the deterministic engine.
+- Startup auto-refresh job added in `api/main.py` (`startup-refresh`, +10s after boot) so
+  CelesTrak data is reinstated when internet is available; interval job unchanged.
+- Ask Perigee deterministic fallback now answers from context (tier counts, top event,
+  debris/type filters) instead of a canned line; `agent_event_context` includes object types;
+  QUERY_PROMPT documents the agent's capabilities.
+- Settings page rebuilt: localStorage-backed toggles (AI assistance hides agent surfaces,
+  live-update toasts incl. FR-27 toast implementation, client auto-refresh off/10m/30m,
+  compact tables) plus read-only backend panel fed by `/api/config` (now includes `ai`).
+- Playwright verification: 15 checks PASS, zero console errors; pytest 12 passed; ruff clean;
+  lint/build clean.
+
 ## Quick resume command block
+
 
 
 

@@ -12,6 +12,7 @@ import {
   websocketUrl,
 } from "./lib/api";
 import "./App.css";
+import { settingsStore, useSettings } from "./lib/settings";
 
 type Page = "Dashboard" | "Objects" | "Screening" | "Risk Analysis" | "Propagation" | "Settings";
 const navItems: Page[] = ["Dashboard", "Objects", "Screening", "Risk Analysis", "Propagation"];
@@ -25,6 +26,8 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [socketState, setSocketState] = useState("connecting");
+  const [toast, setToast] = useState<string | null>(null);
+  const [settings, updateSettings] = useSettings();
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -51,11 +54,25 @@ function App() {
       socket = new WebSocket(websocketUrl());
       socket.onopen = () => setSocketState("live");
       socket.onmessage = (message) => {
-        const event = JSON.parse(message.data) as { type: string };
+        const event = JSON.parse(message.data) as { type: string; payload?: Record<string, unknown> };
         if (event.type === "refresh_started") setRefreshing(true);
-        if (["refresh_completed", "refresh_failed", "event_created", "event_updated"].includes(event.type)) {
+        if (event.type === "refresh_failed") {
           setRefreshing(false);
+          const detail = typeof event.payload?.error === "string" ? ` — ${event.payload.error}` : "";
+          setToast(`Screening failed${detail}`);
+        }
+        if (["refresh_completed", "refresh_failed", "event_created", "event_updated"].includes(event.type)) {
+          if (event.type === "refresh_completed") setRefreshing(false);
           void loadDashboard();
+        }
+        if (
+          settingsStore.get().liveToasts &&
+          ["event_created", "event_updated"].includes(event.type) &&
+          typeof event.payload?.object_a === "string"
+        ) {
+          setToast(
+            `${event.type === "event_created" ? "New close pass detected" : "Event re-scored"} — ${event.payload.object_a} × ${String(event.payload.object_b)} (${String(event.payload.risk_tier)})`,
+          );
         }
       };
       socket.onclose = () => {
@@ -72,6 +89,12 @@ function App() {
     };
   }, [loadDashboard]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   const refresh = async () => {
     setRefreshing(true);
     try {
@@ -82,13 +105,20 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (settings.autoRefreshMinutes <= 0) return;
+    const interval = window.setInterval(() => void refresh(), settings.autoRefreshMinutes * 60_000);
+    return () => window.clearInterval(interval);
+     
+  }, [settings.autoRefreshMinutes]);
+
   const navigate = (item: Page) => {
     setPage(item);
     setSidebarOpen(false);
   };
 
   return (
-    <div className={`app ${sidebarOpen ? "sidebar-open" : ""}`}>
+    <div className={`app ${sidebarOpen ? "sidebar-open" : ""} ${settings.compactTables ? "compact-tables" : ""}`}>
       <button
         className="mobile-menu-button"
         onClick={() => setSidebarOpen((open) => !open)}
@@ -131,14 +161,21 @@ function App() {
             Backend connection issue: {error}
           </div>
         )}
-        {page === "Dashboard" && <Dashboard stats={stats} events={events} refreshing={refreshing} onRefresh={refresh} onSelect={setSelectedId} />}
+        {toast && (
+          <div className="toast" role="status">
+            ◈ {toast}
+          </div>
+        )}
+        {page === "Dashboard" && <Dashboard stats={stats} events={events} refreshing={refreshing} onRefresh={refresh} onSelect={setSelectedId} aiEnabled={settings.aiAssistance} />}
         {page === "Objects" && <ObjectsPage stats={stats} />}
         {page === "Screening" && <ScreeningPage stats={stats} events={events} refreshing={refreshing} onRefresh={refresh} onSelect={setSelectedId} />}
         {page === "Risk Analysis" && <RiskAnalysisPage stats={stats} events={events} onSelect={setSelectedId} />}
         {page === "Propagation" && <PropagationPage />}
-        {page === "Settings" && <SettingsPage />}
+        {page === "Settings" && <SettingsPage settings={settings} onUpdate={updateSettings} />}
       </main>
-      {selectedId && <EventDrawer key={selectedId} eventId={selectedId} onClose={() => setSelectedId(null)} />}
+      {selectedId && (
+        <EventDrawer key={selectedId} eventId={selectedId} onClose={() => setSelectedId(null)} aiEnabled={settings.aiAssistance} />
+      )}
     </div>
   );
 }
@@ -146,12 +183,13 @@ function App() {
 const byScoreDesc = (a: EventSummary, b: EventSummary) =>
   b.risk_score - a.risk_score || a.tca.localeCompare(b.tca);
 
-function Dashboard({ stats, events, refreshing, onRefresh, onSelect }: {
+function Dashboard({ stats, events, refreshing, onRefresh, onSelect, aiEnabled }: {
   stats: Stats | null;
   events: EventSummary[];
   refreshing: boolean;
   onRefresh: () => void;
   onSelect: (id: string) => void;
+  aiEnabled: boolean;
 }) {
   const ranked = [...events].sort(byScoreDesc);
   const criticalCount = ranked.filter((event) => event.risk_tier === "critical").length;
@@ -197,7 +235,7 @@ function Dashboard({ stats, events, refreshing, onRefresh, onSelect }: {
         </div>
       </section>
 
-      <AgentPanel events={ranked} onSelect={onSelect} />
+      {aiEnabled && <AgentPanel events={ranked} onSelect={onSelect} />}
 
       <section className="panel table-panel">
         <div className="panel-header">
@@ -739,7 +777,7 @@ function TrendSparkline({ points }: { points: EventDetail["trend_history"] }) {
   );
 }
 
-function EventDrawer({ eventId, onClose }: { eventId: string; onClose: () => void }) {
+function EventDrawer({ eventId, onClose, aiEnabled }: { eventId: string; onClose: () => void; aiEnabled: boolean }) {
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [explanation, setExplanation] = useState<Awaited<ReturnType<typeof api.explain>> | null>(null);
   const [recommendation, setRecommendation] = useState<Awaited<ReturnType<typeof api.recommendation>> | null>(null);
@@ -794,10 +832,12 @@ function EventDrawer({ eventId, onClose }: { eventId: string; onClose: () => voi
                 <small>{factor.caption}</small>
               </div>
             ))}
-            <button className="screening-btn" onClick={() => void explain()} disabled={explaining}>
-              {explaining ? "Thinking with local AI…" : explanation ? "Refresh AI explanation" : "Explain with local AI"}
-            </button>
-            {explanation && (
+            {aiEnabled && (
+              <button className="screening-btn" onClick={() => void explain()} disabled={explaining}>
+                {explaining ? "Thinking with local AI…" : explanation ? "Refresh AI explanation" : "Explain with local AI"}
+              </button>
+            )}
+            {aiEnabled && explanation && (
               <div className="ai-box">
                 <small>AI-assisted · {explanation.source}</small>
                 <strong>{explanation.headline}</strong>
@@ -806,7 +846,7 @@ function EventDrawer({ eventId, onClose }: { eventId: string; onClose: () => voi
                 <small>{explanation.caveat}</small>
               </div>
             )}
-            {recommendation && (
+            {aiEnabled && recommendation && (
               <div className="ai-box">
                 <small>AI-assisted triage suggestion</small>
                 <p>{recommendation.recommendation}</p>
@@ -846,7 +886,30 @@ function EmptyTable({ message }: { message: string }) {
   );
 }
 
-function SettingsPage() {
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
+  return (
+    <button
+      className={`toggle ${checked ? "toggle-on" : ""}`}
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+    >
+      <span />
+    </button>
+  );
+}
+
+function SettingsPage({ settings, onUpdate }: {
+  settings: ReturnType<typeof useSettings>[0];
+  onUpdate: (patch: Partial<ReturnType<typeof useSettings>[0]>) => void;
+}) {
+  const [config, setConfig] = useState<Config | null>(null);
+
+  useEffect(() => {
+    void api.config().then(setConfig).catch(() => undefined);
+  }, []);
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -854,23 +917,69 @@ function SettingsPage() {
           <p className="eyebrow">APPLICATION PREFERENCES</p>
           <h2>Preferences</h2>
         </div>
+        <span className="data-badge">saved locally</span>
       </div>
+
       <div className="settings-list">
         <div className="setting-row">
           <div>
-            <strong>Automatic refresh</strong>
-            <small>Backend scheduler runs on its configured interval.</small>
+            <strong>AI assistance</strong>
+            <small>Show the Ask Perigee panel and per-event AI explanations. The deterministic dashboard is unaffected when off.</small>
           </div>
-          <span className="data-badge">backend controlled</span>
+          <Toggle checked={settings.aiAssistance} onChange={(next) => onUpdate({ aiAssistance: next })} label="AI assistance" />
         </div>
         <div className="setting-row">
           <div>
-            <strong>AI assistance</strong>
-            <small>Local Ollama output is advisory and visibly labeled.</small>
+            <strong>Live update announcements</strong>
+            <small>Briefly announce new or re-scored close approaches as they arrive over WebSocket.</small>
           </div>
-          <span className="data-badge">qwen3.5:9b</span>
+          <Toggle checked={settings.liveToasts} onChange={(next) => onUpdate({ liveToasts: next })} label="Live update announcements" />
+        </div>
+        <div className="setting-row">
+          <div>
+            <strong>Client auto-refresh</strong>
+            <small>Trigger a full deterministic re-screen from this browser while the dashboard stays open. The backend scheduler runs regardless.</small>
+          </div>
+          <select
+            className="setting-select"
+            value={String(settings.autoRefreshMinutes)}
+            aria-label="Client auto-refresh interval"
+            onChange={(event) => onUpdate({ autoRefreshMinutes: Number(event.target.value) })}
+          >
+            <option value="0">Off (backend schedule only)</option>
+            <option value="10">Every 10 minutes</option>
+            <option value="30">Every 30 minutes</option>
+          </select>
+        </div>
+        <div className="setting-row">
+          <div>
+            <strong>Compact tables</strong>
+            <small>Denser rows for screening and activity tables — fits more events on screen.</small>
+          </div>
+          <Toggle checked={settings.compactTables} onChange={(next) => onUpdate({ compactTables: next })} label="Compact tables" />
         </div>
       </div>
+
+      <div className="panel-header backend-panel-header">
+        <div>
+          <p className="eyebrow">BACKEND CONTROLLED · READ ONLY</p>
+          <h2>Deterministic engine settings</h2>
+        </div>
+        <span className="data-badge">{config ? "live" : "loading…"}</span>
+      </div>
+      <small className="muted-copy config-note">
+        These values are environment-driven on the backend and cannot be changed from the UI, keeping the scoring pipeline auditable.
+      </small>
+      {config && (
+        <div className="config-grid settings-config-grid">
+          <div><small>Screening window</small><strong>{config.screening.horizon_hours} h ahead</strong></div>
+          <div><small>Flag below</small><strong>{config.screening.conjunction_threshold_km} km separation</strong></div>
+          <div><small>Scheduled refresh</small><strong>every {config.screening.refresh_interval_hours} h</strong></div>
+          <div><small>Risk weights</small><strong>{Object.entries(config.risk.weights).map(([name, weight]) => `${name.replace("_", " ")} ${weight}`).join(" · ")}</strong></div>
+          <div><small>Tier cutoffs</small><strong>Critical ≥ {config.risk.critical_threshold} · Elevated ≥ {config.risk.elevated_threshold}</strong></div>
+          <div><small>AI layer</small><strong>{config.ai.enabled ? `${config.ai.model} (local)` : "disabled"}</strong></div>
+        </div>
+      )}
     </section>
   );
 }

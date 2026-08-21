@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+from collections import Counter
 from datetime import datetime
 from typing import Any, TypeVar
 
@@ -28,12 +29,19 @@ logger = logging.getLogger(__name__)
 PayloadT = TypeVar("PayloadT", bound=BaseModel)
 
 QUERY_PROMPT = """You are Ask Perigee, a read-only analyst assistant.
-Use only the dashboard context returned by get_dashboard_context. Answer the user's
-question directly and briefly. Never invent records, numbers, timestamps, or event IDs;
+Use only the dashboard context returned by get_dashboard_context, which contains the
+screening stats (stats) and every currently flagged conjunction event (events, pre-sorted
+by risk score descending). You can: summarize the whole screening picture, name the most
+urgent alert, rank or compare events, filter by risk tier or object type (payload/debris/
+rocket body), find the closest pass or highest relative velocity, count events matching a
+condition, and describe any single event in the list. Answer the user's question directly
+and briefly using those facts. Never invent records, numbers, timestamps, or event IDs;
 if the context is insufficient, say exactly that you do not have enough information.
 Do not claim collision probability, operational certainty, or recommend maneuvers.
 Return only the requested structured response. Referenced IDs must be copied exactly.
 """
+
+DETERMINISTIC_FALLBACK = "I don't have enough information to answer that from the current screening results."
 
 RECOMMENDATION_PROMPT = """You are Perigee's read-only triage advisor.
 Use only the event facts returned by get_event_facts. Write one or two sentences for a
@@ -166,15 +174,71 @@ class AgentFeatures:
 
     async def query(self, question: str, context: dict[str, Any]) -> AgentQueryResponse:
         if not self.config.enabled:
-            return AgentQueryResponse(answer="AI features are disabled; use the dashboard filters to inspect results.", source="template", model=self.config.model)
+            return self._deterministic_query(question, context, provider_error=None)
         try:
             payload = await asyncio.wait_for(asyncio.to_thread(self._run, {"question": question, **context}, QUERY_PROMPT, AgentQueryPayload, "get_dashboard_context", user_message=f"Analyst question: {question}\nUse the read-only context tool, then answer it from that data only."), self.config.timeout_seconds + 5)
-            self._validate_text(payload.answer)
-            self._validate_ids(payload.referenced_event_ids)
-            return AgentQueryResponse(**payload.model_dump(), source="ollama", model=self.config.model)
+            answer = self._validate_text(payload.answer)
+            referenced = self._validate_ids(payload.referenced_event_ids)
+            return AgentQueryResponse(answer=answer, referenced_event_ids=referenced, source="ollama", model=self.config.model)
         except Exception as exc:  # noqa: BLE001 - optional provider must fail soft
             logger.warning("Ask Perigee unavailable: %s", exc)
-            return AgentQueryResponse(answer="I don't have enough information to answer that from the current screening results.", source="template", model=self.config.model, provider_error=str(exc))
+            return self._deterministic_query(question, context, provider_error=str(exc))
+
+    @staticmethod
+    def _deterministic_query(question: str, context: dict[str, Any], *, provider_error: str | None) -> AgentQueryResponse:
+        """Grounded template answer built from the same read-only context.
+
+        Keeps Ask Perigee useful when Ollama is disabled or fails: the answer
+        is composed deterministically from the exact facts the agent would
+        have received — never invented.
+        """
+        events = context.get("events") or []
+        stats = context.get("stats") or {}
+        if not events:
+            return AgentQueryResponse(answer=DETERMINISTIC_FALLBACK, source="template", model=AgentFeatures._model_name(context), provider_error=provider_error)
+
+        lowered = question.lower()
+        top = max(events, key=lambda event: (float(event["risk_score"]), -event["tca"].timestamp() if hasattr(event["tca"], "timestamp") else 0))
+
+        def label(event: dict[str, Any]) -> str:
+            return f"{event['object_a_name']} × {event['object_b_name']}"
+
+        if any(term in lowered for term in ("debris", "payload", "rocket")):
+            kind = next((term for term in ("debris", "payload", "rocket") if term in lowered), "debris")
+            matches = [
+                event
+                for event in events
+                if kind in (str(event.get("object_a_type", "")), str(event.get("object_b_type", "")))
+                or kind in label(event).lower()
+            ]
+            if matches:
+                listed = "; ".join(f"{label(event)} ({event['risk_tier']}, score {float(event['risk_score']):.0f})" for event in matches[:3])
+                answer = f"{len(matches)} of {len(events)} flagged events involve {kind}: {listed}."
+            else:
+                answer = f"No flagged events currently involve {kind}; all {len(events)} tracked close approaches are between other object types."
+        elif any(term in lowered for term in ("urgent", "priority", "worst", "most")) or "summar" in lowered or "picture" in lowered or "overview" in lowered:
+            tiers = Counter(str(event["risk_tier"]) for event in events)
+            tracked = stats.get("objects_tracked")
+            scope = f" across {tracked} tracked objects" if tracked else ""
+            fastest = max(events, key=lambda event: float(event["relative_velocity_kmps"]))
+            closest = min(events, key=lambda event: float(event["miss_distance_km"]))
+            answer = (
+                f"The current screen flags {len(events)} close approaches{scope}: "
+                f"{tiers.get('critical', 0)} critical, {tiers.get('elevated', 0)} elevated, {tiers.get('low', 0)} low. "
+                f"Highest priority is {label(top)} at score {float(top['risk_score']):.0f} ({top['risk_tier']}); "
+                f"the closest pass is {closest['miss_distance_km']} km and the fastest is {fastest['relative_velocity_kmps']} km/s."
+            )
+        else:
+            answer = (
+                f"{label(top)} is the highest-priority flagged event at score {float(top['risk_score']):.0f} ({top['risk_tier']}). "
+                f"{len(events)} events are flagged in total; ask for a summary, a tier filter, or a specific pair for details."
+            )
+        return AgentQueryResponse(answer=answer, referenced_event_ids=[str(top["id"])], source="template", model=AgentFeatures._model_name(context), provider_error=provider_error)
+
+    @staticmethod
+    def _model_name(context: dict[str, Any]) -> str:
+        model = context.get("model")
+        return str(model) if model else OllamaConfig().model
 
     async def recommendation(self, facts: dict[str, Any], screened_at: datetime) -> RecommendationResponse:
         if not self.config.enabled:

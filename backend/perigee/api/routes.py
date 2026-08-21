@@ -11,6 +11,7 @@ from perigee.agent.schemas import AgentExplanationResponse
 from perigee.api.schemas import (
     AgentQueryRequest,
     AgentQueryResponse,
+    AiConfigResponse,
     ConfigResponse,
     EventDetailResponse,
     EventListResponse,
@@ -29,7 +30,7 @@ from perigee.api.schemas import (
     StatsResponse,
     TrendPoint,
 )
-from perigee.config import RiskConfig, ScreeningConfig
+from perigee.config import OllamaConfig, RiskConfig, ScreeningConfig
 from perigee.domain import ObjectType, OrbitalObject
 from perigee.narrative.templates import (
     event_summary,
@@ -179,6 +180,7 @@ async def agent_query(request: Request, payload: AgentQueryRequest) -> AgentQuer
     context = {
         "stats": dict(stats_row),
         "events": events,
+        "model": state.agent_features.config.model,
     }
     result = await state.agent_features.query(payload.question, context)
     return AgentQueryResponse(**result.model_dump())
@@ -255,6 +257,7 @@ async def list_objects(
 async def get_config() -> ConfigResponse:
     screening = ScreeningConfig()
     risk = RiskConfig()
+    ai = OllamaConfig()
     return ConfigResponse(
         screening=ScreeningConfigResponse(
             horizon_hours=screening.horizon_hours,
@@ -273,6 +276,7 @@ async def get_config() -> ConfigResponse:
             critical_threshold=risk.critical_threshold,
             elevated_threshold=risk.elevated_threshold,
         ),
+        ai=AiConfigResponse(enabled=ai.enabled, model=ai.model),
     )
 
 
