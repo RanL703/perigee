@@ -167,6 +167,134 @@ Copy `.env.example` to `.env` and tune only what the demo needs:
 
 The Docker backend uses `host.docker.internal:11434` to reach Ollama on the host. Host-run Python uses `127.0.0.1:11434` by default.
 
+## Installation
+
+### Prerequisites
+
+Install these before cloning the repo:
+
+| Tool | Version | Notes |
+|---|---|---|
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker + WSL2 on Windows) | latest | runs PostgreSQL, Redis, and the backend container |
+| [Node.js](https://nodejs.org/) | 22+ | for the Vite/React frontend |
+| [Python](https://www.python.org/downloads/) | 3.13 | for the backend and CLI scripts |
+| [uv](https://docs.astral.sh/uv/getting-started/installation/) | latest | Python package/dependency manager used by this repo |
+| [Ollama](https://ollama.com/download) | latest | runs the local `qwen3.5:9b` explanation model |
+
+Verify installs:
+
+```bash
+docker --version
+node --version      # should print v22.x or higher
+python3 --version    # should print 3.13.x
+uv --version
+ollama --version
+```
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/RanL703/perigee.git
+cd perigee
+```
+
+### 2. Set up environment variables
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and adjust values if needed (database URL, CelesTrak catalog URL, Ollama settings, etc. — see the Configuration section below for what each variable does). The defaults work for a local demo out of the box.
+
+### 3. Pull the local AI model (one-time)
+
+```bash
+ollama pull qwen3.5:9b
+```
+
+Confirm it installed correctly:
+
+```bash
+ollama list
+```
+
+### 4. Install Python dependencies
+
+```bash
+uv sync
+```
+
+This creates a `.venv` and installs everything pinned in `uv.lock`.
+
+### 5. Start the backend services (Postgres, Redis, FastAPI backend)
+
+```bash
+docker compose up -d postgres redis backend
+```
+
+Check that all three containers are healthy:
+
+```bash
+docker compose ps
+```
+
+### 6. Install and start the frontend
+
+In a **second terminal**:
+
+```bash
+cd frontend
+npm ci          # first run only — installs exact locked versions
+npm run dev -- --host 127.0.0.1
+```
+
+### 7. Open the app
+
+| Service | URL |
+|---|---|
+| Dashboard (frontend) | http://127.0.0.1:5173 |
+| Backend API | http://127.0.0.1:8000 |
+| API docs (Swagger) | http://127.0.0.1:8000/docs |
+| WebSocket (live events) | ws://127.0.0.1:8000/ws/events |
+
+### 8. Verify everything is working
+
+```bash
+curl -fsS http://127.0.0.1:8000/health
+```
+
+Expected response:
+
+```json
+{"status": "ok"}
+```
+
+Then in the dashboard, confirm the header shows **"Live telemetry"** and click **Refresh now** to trigger the first ingestion + screening cycle.
+
+---
+
+### Stopping the app
+
+```bash
+docker compose down
+```
+
+(This stops Postgres, Redis, and the backend. Stop the frontend dev server with `Ctrl+C` in its terminal.)
+
+### Common install issues
+
+**`docker compose up` fails / containers unhealthy**
+Run `docker compose logs backend` to see the actual error — usually a missing `.env` value or a port already in use (8000, 5432, or 6379).
+
+**`npm ci` fails**
+Make sure you're on Node 22+ (`node --version`). Delete `frontend/node_modules` and `frontend/package-lock.json` conflicts if any exist, then retry.
+
+**Ollama model not found / AI explanations show "template" responses**
+Run `ollama list` to confirm `qwen3.5:9b` is actually pulled. If using Docker for the backend, it reaches Ollama via `host.docker.internal:11434` — make sure Ollama is running on the host machine, not inside a container.
+
+**`uv sync` fails**
+Confirm Python 3.13 is installed and is the version `uv` picks up (`uv python list`). If not, run `uv python install 3.13` first.
+
 ## Troubleshooting
 
 **Frontend shows “Backend connection issue”**
