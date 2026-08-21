@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from perigee.api.routes import router
-from perigee.config import DatabaseConfig
+from perigee.config import DatabaseConfig, ScreeningConfig
 from perigee.persistence.repository import PerigeeRepository
 from perigee.services.refresh import AppState, start_refresh
 
@@ -17,7 +17,13 @@ async def lifespan(app: FastAPI):
     state = AppState(repository=repository)
     app.state.perigee = state
     scheduler = AsyncIOScheduler(timezone=UTC)
-    scheduler.add_job(start_refresh, "interval", hours=2, args=[state], id="periodic-refresh")
+    scheduler.add_job(
+        start_refresh,
+        "interval",
+        hours=ScreeningConfig().refresh_interval_hours,
+        args=[state],
+        id="periodic-refresh",
+    )
     scheduler.start()
     try:
         yield

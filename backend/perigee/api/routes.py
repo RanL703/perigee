@@ -25,6 +25,7 @@ from perigee.narrative.templates import (
     format_distance,
     format_velocity,
     object_type_description,
+    relative_time,
     time_to_tca,
 )
 from perigee.propagation.screening import propagate
@@ -143,9 +144,11 @@ async def stats(request: Request) -> StatsResponse:
         elevated_count=row["elevated_count"],
         low_count=row["low_count"],
         last_screened_at=last,
-        last_refresh_display=time_to_tca(last) if isinstance(last, datetime) else None,
+        last_refresh_at=state.last_refresh_at,
+        last_refresh_display=relative_time(state.last_refresh_at) if state.last_refresh_at else None,
         data_source=state.data_source,
         refresh_in_progress=state.refresh_in_progress,
+        last_refresh_error=state.last_refresh_error,
     )
 
 

@@ -64,9 +64,11 @@ class StatsResponse(BaseModel):
     elevated_count: int
     low_count: int
     last_screened_at: datetime | None
+    last_refresh_at: datetime | None
     last_refresh_display: str | None
     data_source: str
     refresh_in_progress: bool
+    last_refresh_error: str | None = None
 
 
 class RefreshResponse(BaseModel):

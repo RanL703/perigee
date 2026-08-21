@@ -28,6 +28,7 @@ class ScreeningConfig:
     cache_path: str = getenv("CELESTRAK_CACHE_PATH", "data/cache/celestrak_active.json")
     fetch_retries: int = _int("CELESTRAK_FETCH_RETRIES", 3)
     fetch_backoff_seconds: float = _float("CELESTRAK_FETCH_BACKOFF_SECONDS", 1.0)
+    refresh_interval_hours: int = _int("REFRESH_INTERVAL_HOURS", 2)
 
 
 @dataclass(frozen=True, slots=True)

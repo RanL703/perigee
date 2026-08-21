@@ -27,7 +27,11 @@ def _satellite(object_: OrbitalObject) -> Satrec:
 def propagate(object_: OrbitalObject, at: datetime) -> StateVector:
     """Return a TEME state vector in kilometres and kilometres per second."""
     utc_at = at.astimezone(UTC)
-    satellite = _satellite(object_)
+    return _propagate_satellite(_satellite(object_), object_, utc_at)
+
+
+def _propagate_satellite(satellite: Satrec, object_: OrbitalObject, at: datetime) -> StateVector:
+    utc_at = at.astimezone(UTC)
     jd, fraction = jday_datetime(utc_at)
     error, position, velocity = satellite.sgp4(jd, fraction)
     if error:
@@ -47,8 +51,8 @@ def _relative_velocity(a: StateVector, b: StateVector) -> float:
     return _norm(tuple(left - right for left, right in zip(a.velocity_kmps, b.velocity_kmps)))
 
 
-def _altitude_band_km(object_: OrbitalObject) -> tuple[float, float]:
-    satellite = _satellite(object_)
+def _altitude_band_km(object_: OrbitalObject, satellite: Satrec | None = None) -> tuple[float, float]:
+    satellite = satellite or _satellite(object_)
     mean_motion_rad_s = satellite.no_kozai / 60.0
     semi_major_axis = (EARTH_MU_KM3_S2 / (mean_motion_rad_s * mean_motion_rad_s)) ** (1 / 3)
     eccentricity = satellite.ecco
@@ -59,10 +63,13 @@ def _altitude_band_km(object_: OrbitalObject) -> tuple[float, float]:
 
 
 def _overlapping_altitude_bands(
-    a: OrbitalObject, b: OrbitalObject, padding_km: float
+    a: OrbitalObject,
+    b: OrbitalObject,
+    padding_km: float,
+    altitude_bands: dict[int, tuple[float, float]],
 ) -> bool:
-    a_low, a_high = _altitude_band_km(a)
-    b_low, b_high = _altitude_band_km(b)
+    a_low, a_high = altitude_bands[a.norad_id]
+    b_low, b_high = altitude_bands[b.norad_id]
     return a_low <= b_high + padding_km and b_low <= a_high + padding_km
 
 
@@ -81,14 +88,21 @@ def screen(objects: list[OrbitalObject], start: datetime, config: ScreeningConfi
     """
     start = start.astimezone(UTC)
     duration_seconds = config.horizon_hours * 3600
+    satellites = {object_.norad_id: _satellite(object_) for object_ in objects}
+    altitude_bands = {
+        object_.norad_id: _altitude_band_km(object_, satellites[object_.norad_id]) for object_ in objects
+    }
     candidates = [
         pair
         for pair in combinations(sorted(objects, key=lambda item: item.norad_id), 2)
-        if _overlapping_altitude_bands(*pair, config.altitude_band_padding_km)
+        if _overlapping_altitude_bands(*pair, config.altitude_band_padding_km, altitude_bands)
     ]
     coarse_times = list(_times(start, duration_seconds, config.coarse_step_seconds))
     states = {
-        object_.norad_id: [propagate(object_, at) for at in coarse_times] for object_ in objects
+        object_.norad_id: [
+            _propagate_satellite(satellites[object_.norad_id], object_, at) for at in coarse_times
+        ]
+        for object_ in objects
     }
     coarse_hits: list[tuple[OrbitalObject, OrbitalObject, datetime]] = []
     for object_a, object_b in candidates:
@@ -108,7 +122,13 @@ def screen(objects: list[OrbitalObject], start: datetime, config: ScreeningConfi
         fine_times = list(
             _times(window_start, int((window_end - window_start).total_seconds()), config.fine_step_seconds)
         )
-        fine_states = [(propagate(object_a, at), propagate(object_b, at)) for at in fine_times]
+        fine_states = [
+            (
+                _propagate_satellite(satellites[object_a.norad_id], object_a, at),
+                _propagate_satellite(satellites[object_b.norad_id], object_b, at),
+            )
+            for at in fine_times
+        ]
         closest_a, closest_b = min(fine_states, key=lambda pair: _distance(*pair))
         miss_distance = _distance(closest_a, closest_b)
         if miss_distance <= config.conjunction_threshold_km:

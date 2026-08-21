@@ -18,6 +18,17 @@ def time_to_tca(tca: datetime, *, now: datetime | None = None) -> str:
     return f"in {minutes}m"
 
 
+def relative_time(when: datetime, *, now: datetime | None = None) -> str:
+    seconds = max(0, int(((now or datetime.now(UTC)) - when).total_seconds()))
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m ago"
+
+
 def event_summary(
     object_a: str, object_b: str, miss_distance_km: float, tca: datetime
 ) -> str:

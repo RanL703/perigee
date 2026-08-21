@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -10,6 +11,8 @@ from perigee.persistence.repository import PerigeeRepository
 from perigee.propagation.screening import screen
 from perigee.scoring.risk import assess
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class AppState:
@@ -17,6 +20,7 @@ class AppState:
     websocket_manager: ConnectionManager = field(default_factory=ConnectionManager)
     data_source: str = "unknown"
     last_refresh_at: datetime | None = None
+    last_refresh_error: str | None = None
     active_job_id: UUID | None = None
     active_task: asyncio.Task[None] | None = None
 
@@ -63,6 +67,7 @@ async def _screen_and_store(state: AppState, job_id: UUID) -> None:
             )
         state.data_source = result.source
         state.last_refresh_at = started_at
+        state.last_refresh_error = None
         await state.websocket_manager.broadcast(
             {
                 "type": "refresh_completed",
@@ -75,7 +80,9 @@ async def _screen_and_store(state: AppState, job_id: UUID) -> None:
                 },
             }
         )
-    except Exception as exc:  # noqa: BLE001 - refresh failures are reported to clients
+    except Exception as exc:
+        state.last_refresh_error = str(exc)
+        logger.exception("Perigee refresh failed", extra={"job_id": str(job_id)})
         await state.websocket_manager.broadcast(
             {
                 "type": "refresh_failed",
