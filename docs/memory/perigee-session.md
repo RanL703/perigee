@@ -192,7 +192,71 @@ The worktree contains backend, frontend, dependency, plan, skill, and documentat
 4. Consider adding a backend total-count field to `/api/events` if the frontend needs true page counts; current response exposes `total_returned` only.
 5. Keep AI prompts and schemas strict; do not relax validation to make a demo look populated.
 
+## Session 2026-08-21 — module restoration + guardrail rework
+
+### Agent layer fixes
+
+- `backend/perigee/agent/guardrails.py` (new): sentence-level sanitisation. Unsafe sentences
+  (probability figures like "12 %", maneuver/approve/reject directives) are removed from model
+  output instead of failing the whole response; fail-closed only when nothing advisory-safe
+  remains. Used by `features.py::_validate_text` and `ollama.py::_validate_payload`.
+- `features.py`: Qwen often answers correctly in prose while skipping LangChain's structured
+  tool call. `_run` now coerces the final message into the schema (embedded JSON first, then
+  single-string-field prose). Ask Perigee passes the actual analyst question in the user
+  message; recursion limit raised to 6.
+- `ollama.py::_parse_markdown_payload`: accepts snake_case labels (`operator_focus:`) and a
+  JSON-array focus value. NOTE: `\W` does NOT match `_`; separators use `[\W_]*`.
+
+### Screening correctness
+
+- Docked/co-orbital pairs (ISS modules vs each other) produced identical 0 km 70.0 events that
+  dominated priority. `screen()` now skips pairs whose relative velocity at closest approach is
+  below `COORBITAL_RELATIVE_VELOCITY_KMPS` (default 0.05 km/s, env-tunable). Stale junk events
+  were deleted from Postgres once.
+
+### Demo seed data (owner-authorized fabrication)
+
+- `backend/scripts/seed_demo_events.py`: seeds 6 valid-TLE objects and 3 fabricated close
+  approaches scored by the real deterministic engine: SENTINEL-6A × FENGYUN 1C DEB critical
+  84.3 (worsening trend), STARLINK-3042 × COSMOS 2251 DEB elevated 59.1, SL-16 R/B × IRIDIUM
+  109 low 39.1. Refresh cycles never delete events, so the seed survives re-screens.
+
+### New backend endpoints
+
+- `GET /api/objects?search=&limit=` — catalog listing for Objects/Propagation pages.
+- `GET /api/config` — screening/risk thresholds for the Screening page (NFR-5 visibility).
+- `/api/stats` now falls back to persisted `last_screened_at` when in-memory `last_refresh_at`
+  resets after a restart, so the header no longer shows "Never" with a live catalog.
+
+### Frontend
+
+- `App.tsx` rewritten (readable formatting): restored full **Screening** (config grid + run
+  refresh + TCA-ordered results table), **Risk Analysis** (tier distribution bars, tier filter
+  chips, score-gauge ranked list), **Propagation** (search catalog → SGP4 lat/lon/alt), and a
+  real **Objects** catalog page — all wired to the API. Dashboard orbit view is data-driven:
+  tier-colored clickable markers positioned by rank/tier ring, pulsing critical markers,
+  per-tier legend counts. Priority list sorted explicitly by score desc then TCA. Drawer gained
+  a trend sparkline; Ask Perigee got quick-prompt chips.
+- Button-based `.table-row`s needed explicit transparent-background reset (UA gray default).
+
+### Verification evidence
+
+```text
+ruff check backend            -> passed
+pytest -q                     -> 12 passed (incl. co-orbital exclusion + parser tests)
+npm run lint / npm run build  -> passed
+Playwright Chromium smoke     -> all 5 pages render, 0 console errors;
+                                 orbit markers 3, drawer factors 4, propagation
+                                 shows lat/lon/alt, screening table 3 rows
+Ask Perigee custom prompt     -> source "ollama", correct referenced_event_ids
+Probability-bait question     -> deterministic fallback, no probability emitted
+explain/recommendation        -> source "ollama"
+POST /api/refresh             -> completed; junk co-orbital events did not return
+```
+
 ## Quick resume command block
+
+
 
 ```bash
 cd /home/myst/code/perigee

@@ -25,6 +25,10 @@ class ScreeningConfig:
     fine_step_seconds: int = _int("FINE_STEP_SECONDS", 30)
     coarse_candidate_distance_km: float = _float("COARSE_CANDIDATE_DISTANCE_KM", 2_000.0)
     altitude_band_padding_km: float = _float("ALTITUDE_BAND_PADDING_KM", 150.0)
+    # Pairs flying with near-identical states (docked modules, co-orbital
+    # clusters) never converge on each other; they are one operational body,
+    # so they must not flood the event list with identical 0 km encounters.
+    coorbital_relative_velocity_kmps: float = _float("COORBITAL_RELATIVE_VELOCITY_KMPS", 0.05)
     cache_path: str = getenv("CELESTRAK_CACHE_PATH", "data/cache/celestrak_active.json")
     fetch_retries: int = _int("CELESTRAK_FETCH_RETRIES", 3)
     fetch_backoff_seconds: float = _float("CELESTRAK_FETCH_BACKOFF_SECONDS", 1.0)

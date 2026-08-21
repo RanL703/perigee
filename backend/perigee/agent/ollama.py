@@ -19,6 +19,7 @@ from langchain_ollama import ChatOllama
 from perigee.config import OllamaConfig
 from perigee.narrative.templates import event_summary, factor_caption
 
+from .guardrails import safe_advisory_text, sanitize_advisory_text
 from .schemas import AgentExplanationPayload, AgentExplanationResponse
 
 logger = logging.getLogger(__name__)
@@ -132,24 +133,24 @@ class OllamaAssistant:
 
     @staticmethod
     def _parse_markdown_payload(content: str) -> AgentExplanationPayload | None:
-        def section(name: str, next_names: tuple[str, ...] = (), *, collapse: bool = True) -> str:
-            stops = "|".join(re.escape(item) for item in next_names)
-            pattern = rf"(?is)(?:^|\n)\s*\**{re.escape(name)}\**\s*:\s*(.*?)(?=\n\s*\**(?:{stops})\**\s*:|\Z)"
+        def section(name_pattern: str, stop_pattern: str = r"(?!x)x", *, collapse: bool = True) -> str:
+            # Labels arrive as "Headline", "operator_focus", "**Explanation:**"
+            # and similar variants; match flexibly around the field name.
+            pattern = (
+                rf"(?is)(?:^|\n)\s*\**(?:{name_pattern})\**\s*:\s*"
+                rf"(.*?)(?=\n\s*\**(?:{stop_pattern})\**\s*:|\Z)"
+            )
             match = re.search(pattern, content)
             if not match:
                 return ""
             value = match.group(1).strip()
             return re.sub(r"\s+", " ", value).strip(" -*") if collapse else value
 
-        headline = section("Headline", ("Explanation", "Operator Focus", "Caveat"))
-        explanation = section("Explanation", ("Operator Focus", "Caveat"))
-        focus_text = section("Operator Focus", ("Caveat",), collapse=False)
-        caveat = section("Caveat")
-        operator_focus = [
-            re.sub(r"^\s*[-*]\s*", "", item).strip()
-            for item in re.split(r"\s*(?:\n|;)+\s*", focus_text)
-            if item.strip().strip("*-").strip()
-        ][:3]
+        headline = section(r"headline", r"explanation|operator[\W_]*focus|caveat")
+        explanation = section(r"explanation", r"operator[\W_]*focus|caveat")
+        focus_text = section(r"operator[\W_]*focus", r"caveat", collapse=False)
+        caveat = section(r"caveat")
+        operator_focus = OllamaAssistant._parse_focus_items(focus_text)
         if not headline or not explanation or not operator_focus or not caveat:
             return None
         return AgentExplanationPayload(
@@ -160,14 +161,37 @@ class OllamaAssistant:
         )
 
     @staticmethod
+    def _parse_focus_items(focus_text: str) -> list[str]:
+        stripped = focus_text.strip()
+        if stripped.startswith("["):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, list):
+                    return [str(item).strip() for item in data if str(item).strip()][:3]
+            except ValueError:
+                pass
+        items = [
+            re.sub(r"^\s*[-*]\s*", "", item).strip()
+            for item in re.split(r"\s*(?:\n|;)+\s*", stripped)
+            if item.strip().strip("*-").strip()
+        ]
+        return items[:3]
+
+    @staticmethod
     def _validate_payload(payload: AgentExplanationPayload) -> AgentExplanationPayload:
-        forbidden = ("maneuver", "avoidance", "probability", "approve", "reject", "execute command")
-        text = " ".join((payload.headline, payload.explanation, payload.caveat, *payload.operator_focus)).lower()
-        if any(term in text for term in forbidden):
-            raise ValueError("Ollama response contained operational maneuver advice")
-        if "public" not in payload.caveat.lower() or "tle" not in payload.caveat.lower():
+        # Remove guarded sentences per field rather than discarding the whole
+        # explanation; a single slip of phrasing no longer fails the response.
+        # A fully guarded focus item is dropped instead of failing the payload.
+        operator_focus = [item for item in (safe_advisory_text(entry) for entry in payload.operator_focus) if item]
+        cleaned = AgentExplanationPayload(
+            headline=sanitize_advisory_text(payload.headline),
+            explanation=sanitize_advisory_text(payload.explanation),
+            operator_focus=operator_focus,
+            caveat=sanitize_advisory_text(payload.caveat),
+        )
+        if "public" not in cleaned.caveat.lower() or "tle" not in cleaned.caveat.lower():
             raise ValueError("Ollama response omitted the public-TLE caveat")
-        return payload
+        return cleaned
 
     async def explain(self, facts: dict[str, Any]) -> AgentExplanationResponse:
         if not self.config.enabled:

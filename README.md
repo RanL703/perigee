@@ -95,7 +95,9 @@ Expected behavior:
 | GET | `/api/events/{id}` | Event detail, factors, and trend history |
 | POST | `/api/events/{id}/explain` | Guarded local-AI explanation |
 | GET | `/api/events/{id}/recommendation` | Cached per-screening-cycle triage suggestion |
+| GET | `/api/objects` | Searchable tracked-object catalog listing |
 | GET | `/api/objects/{norad_id}` | Object metadata and propagated position |
+| GET | `/api/config` | Screening window/thresholds and risk weights/cutoffs |
 | POST | `/api/refresh` | Asynchronous ingest + screen job |
 | POST | `/api/agent/query` | Read-only Ask Perigee query |
 | GET | `/api/agent/insights` | Read-only descriptive event insights |
@@ -280,6 +282,21 @@ docker compose down
 ```
 
 (This stops Postgres, Redis, and the backend. Stop the frontend dev server with `Ctrl+C` in its terminal.)
+
+### Demo seed dataset (optional)
+
+If a live screening cycle finds no natural close approaches (a valid result), you can seed a
+demo dataset so the dashboard always has a tiered picture to present:
+
+```bash
+.venv/bin/python backend/scripts/seed_demo_events.py
+```
+
+This inserts six valid-TLE objects and three demo conjunctions — one per risk tier, including
+the critical `SENTINEL-6A × FENGYUN 1C DEB` alert with a worsening trend. The approach geometry
+is fabricated on purpose (demo safety net); every score, tier, factor breakdown and trend is
+still produced by the real deterministic scoring engine applied to that geometry. Seeded events
+survive refresh cycles because refresh only upserts newly detected pairs.
 
 ### Common install issues
 

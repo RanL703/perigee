@@ -42,6 +42,16 @@ def test_markdown_provider_response_is_coerced_to_safe_payload() -> None:
     assert payload.operator_focus == ["Verify TLE freshness.", "Compare the next screening cycle."]
 
 
+def test_snake_case_provider_response_with_json_focus_is_coerced() -> None:
+    payload = OllamaAssistant._parse_markdown_payload(
+        """headline: Close pass between A and B.\nexplanation: Ranked critical from the supplied distance.\noperator_focus: ["Validate TLE freshness", "Compare the next cycle"]\ncaveat: Public TLE screening data is not operational."""
+    )
+
+    assert payload is not None
+    assert payload.headline == "Close pass between A and B."
+    assert payload.operator_focus == ["Validate TLE freshness", "Compare the next cycle"]
+
+
 def test_disabled_agent_features_are_read_only_and_deterministic() -> None:
     features = AgentFeatures(OllamaConfig(enabled=False))
     query = asyncio.run(features.query("What is urgent?", {"events": []}))

@@ -49,6 +49,36 @@ export type Recommendation = AgentText & { recommendation: string; screened_at: 
 export type QueryResult = AgentText & { answer: string; referenced_event_ids: string[] };
 export type Insights = AgentText & { insights: { observation: string; related_event_ids: string[] }[] };
 
+export type ObjectListItem = {
+  norad_id: number;
+  name: string;
+  object_type: string;
+  type_description: string;
+  epoch: string | null;
+};
+export type ObjectList = { items: ObjectListItem[]; total_returned: number };
+export type PropagatedObject = EventObject & {
+  epoch: string;
+  last_updated: string;
+  latitude_deg?: number | null;
+  longitude_deg?: number | null;
+  altitude_km?: number | null;
+  altitude_display?: string | null;
+};
+export type ScreeningConfig = {
+  horizon_hours: number;
+  conjunction_threshold_km: number;
+  coorbital_relative_velocity_kmps: number;
+  object_limit: number;
+  refresh_interval_hours: number;
+};
+export type RiskConfig = {
+  weights: Record<string, number>;
+  critical_threshold: number;
+  elevated_threshold: number;
+};
+export type Config = { screening: ScreeningConfig; risk: RiskConfig };
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -66,6 +96,10 @@ export const api = {
   query: (question: string) => request<QueryResult>("/api/agent/query", { method: "POST", body: JSON.stringify({ question }) }),
   insights: () => request<Insights>("/api/agent/insights"),
   refresh: () => request<{ job_id: string; status: string; message: string }>("/api/refresh", { method: "POST" }),
+  objects: (search = "", limit = 200) =>
+    request<ObjectList>(`/api/objects?limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+  object: (noradId: number) => request<PropagatedObject>(`/api/objects/${noradId}`),
+  config: () => request<Config>("/api/config"),
 };
 
 export function websocketUrl(): string {

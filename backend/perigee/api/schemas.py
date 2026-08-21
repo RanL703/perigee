@@ -57,6 +57,38 @@ class ObjectResponse(EventObjectResponse):
     altitude_display: str | None = None
 
 
+class ObjectListItemResponse(BaseModel):
+    norad_id: int
+    name: str
+    object_type: str
+    type_description: str
+    epoch: datetime | None = None
+
+
+class ObjectListResponse(BaseModel):
+    items: list[ObjectListItemResponse]
+    total_returned: int
+
+
+class ScreeningConfigResponse(BaseModel):
+    horizon_hours: int
+    conjunction_threshold_km: float
+    coorbital_relative_velocity_kmps: float
+    object_limit: int
+    refresh_interval_hours: int
+
+
+class RiskConfigResponse(BaseModel):
+    weights: dict[str, float]
+    critical_threshold: float
+    elevated_threshold: float
+
+
+class ConfigResponse(BaseModel):
+    screening: ScreeningConfigResponse
+    risk: RiskConfigResponse
+
+
 class StatsResponse(BaseModel):
     objects_tracked: int
     events_screened: int

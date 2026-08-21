@@ -131,6 +131,12 @@ def screen(objects: list[OrbitalObject], start: datetime, config: ScreeningConfi
         ]
         closest_a, closest_b = min(fine_states, key=lambda pair: _distance(*pair))
         miss_distance = _distance(closest_a, closest_b)
+        relative_velocity = _relative_velocity(closest_a, closest_b)
+        if relative_velocity < config.coorbital_relative_velocity_kmps:
+            # Docked modules and co-orbital clusters share nearly identical
+            # states; they never converge, so skip them instead of emitting a
+            # stream of identical 0 km "conjunctions".
+            continue
         if miss_distance <= config.conjunction_threshold_km:
             events.append(
                 CloseApproach(
@@ -138,7 +144,7 @@ def screen(objects: list[OrbitalObject], start: datetime, config: ScreeningConfi
                     object_b=object_b,
                     tca=closest_a.at,
                     miss_distance_km=miss_distance,
-                    relative_velocity_kmps=_relative_velocity(closest_a, closest_b),
+                    relative_velocity_kmps=relative_velocity,
                 )
             )
     return sorted(events, key=lambda event: event.miss_distance_km)

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from perigee.config import OllamaConfig
 
+from .guardrails import sanitize_advisory_text
 from .schemas import (
     AgentQueryPayload,
     AgentQueryResponse,
@@ -63,7 +64,15 @@ class AgentFeatures:
             timeout=self.config.timeout_seconds,
         )
 
-    def _run(self, facts: dict[str, Any], prompt: str, schema: type[PayloadT], tool_name: str) -> PayloadT:
+    def _run(
+        self,
+        facts: dict[str, Any],
+        prompt: str,
+        schema: type[PayloadT],
+        tool_name: str,
+        *,
+        user_message: str | None = None,
+    ) -> PayloadT:
         facts_json = json.dumps(facts, default=str, separators=(",", ":"))
 
         @tool
@@ -77,32 +86,77 @@ class AgentFeatures:
             system_prompt=prompt,
             response_format=schema,
         )
+        base_message = user_message or "Use the read-only context now. Return only the requested schema."
         last_error: Exception | None = None
-        for instruction in (
-            "Use the read-only context now. Return only the requested schema.",
-            "RETRY: the previous response was invalid. Call the context tool, then emit only valid structured output with no extra fields or prose.",
-        ):
+        for instruction in (base_message, "RETRY: the previous response was invalid. Call the context tool, then emit only valid structured output with no extra fields or prose."):
             try:
                 result = agent.invoke(
                     {"messages": [{"role": "user", "content": instruction}]},
-                    config={"recursion_limit": 5},
+                    config={"recursion_limit": 6},
                 )
                 payload = result.get("structured_response")
                 if isinstance(payload, schema):
                     return payload
+                # Qwen often answers correctly in prose while skipping the
+                # provider's structured-output call. Coerce the final message
+                # into the schema (JSON first, then single-field prose);
+                # anything unusable still fails closed through the retry.
+                messages = result.get("messages", [])
+                content = next(
+                    (
+                        getattr(message, "content", "")
+                        for message in reversed(messages)
+                        if getattr(message, "content", "")
+                    ),
+                    "",
+                )
+                coerced = self._coerce_payload(content, schema)
+                if coerced is not None:
+                    return coerced
                 last_error = TypeError("Agent did not return validated structured output")
             except Exception as exc:  # noqa: BLE001 - retry once, then fail closed
                 last_error = exc
         raise TypeError("Agent did not return validated structured output") from last_error
 
     @staticmethod
+    def _coerce_payload(content: str, schema: type[PayloadT]) -> PayloadT | None:
+        text = content.strip()
+        candidates: list[str] = []
+        json_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if json_match:
+            candidates.append(json_match.group(0))
+        candidates.append(text)
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+            except ValueError:
+                continue
+            if isinstance(data, dict):
+                try:
+                    return schema.model_validate(data)
+                except ValueError:
+                    continue
+        # Schemas with exactly one required string field (query answers,
+        # recommendations) accept grounded prose directly; guardrail
+        # sanitisation still applies afterwards.
+        string_fields = [
+            name for name, field in schema.model_fields.items() if field.annotation is str
+        ]
+        if len(string_fields) == 1 and len(schema.model_fields) == 1 and text:
+            try:
+                return schema.model_validate({string_fields[0]: text})
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
     def _validate_text(text: str, *, allow_empty: bool = False) -> str:
         if not allow_empty and not text.strip():
             raise ValueError("Agent text field is empty")
-        forbidden = ("maneuver", "avoidance", "probability", "approve", "reject", "execute command")
-        if any(term in text.lower() for term in forbidden):
-            raise ValueError("Agent output violated advisory guardrails")
-        return text
+        # Strip guarded sentences (probability figures, maneuver directives)
+        # instead of discarding the entire grounded answer; fail closed only
+        # when nothing advisory-safe remains.
+        return sanitize_advisory_text(text)
 
     @staticmethod
     def _validate_ids(ids: list[str]) -> list[str]:
@@ -114,7 +168,7 @@ class AgentFeatures:
         if not self.config.enabled:
             return AgentQueryResponse(answer="AI features are disabled; use the dashboard filters to inspect results.", source="template", model=self.config.model)
         try:
-            payload = await asyncio.wait_for(asyncio.to_thread(self._run, {"question": question, **context}, QUERY_PROMPT, AgentQueryPayload, "get_dashboard_context"), self.config.timeout_seconds + 5)
+            payload = await asyncio.wait_for(asyncio.to_thread(self._run, {"question": question, **context}, QUERY_PROMPT, AgentQueryPayload, "get_dashboard_context", user_message=f"Analyst question: {question}\nUse the read-only context tool, then answer it from that data only."), self.config.timeout_seconds + 5)
             self._validate_text(payload.answer)
             self._validate_ids(payload.referenced_event_ids)
             return AgentQueryResponse(**payload.model_dump(), source="ollama", model=self.config.model)

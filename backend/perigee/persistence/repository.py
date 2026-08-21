@@ -188,6 +188,17 @@ class PerigeeRepository:
                     event_data[key] = json.loads(event_data[key])
             return {**event_data, "history": [dict(row) for row in history]}
 
+    async def list_objects(self, *, search: str | None, limit: int) -> list[asyncpg.Record]:
+        query = """
+            SELECT norad_id, name, object_type, epoch
+            FROM objects
+            WHERE ($1::text IS NULL OR name ILIKE '%' || $1 || '%')
+            ORDER BY name ASC
+            LIMIT $2
+        """
+        async with self._connection_pool.acquire() as connection:
+            return await connection.fetch(query, search, limit)
+
     async def get_object(self, norad_id: int) -> dict[str, object] | None:
         query = """
             SELECT norad_id, name, object_type, tle_line1, tle_line2, epoch, gp_data, last_updated

@@ -11,6 +11,7 @@ from perigee.agent.schemas import AgentExplanationResponse
 from perigee.api.schemas import (
     AgentQueryRequest,
     AgentQueryResponse,
+    ConfigResponse,
     EventDetailResponse,
     EventListResponse,
     EventObjectResponse,
@@ -18,12 +19,17 @@ from perigee.api.schemas import (
     ExplainResponse,
     FactorResponse,
     InsightsResponse,
+    ObjectListItemResponse,
+    ObjectListResponse,
     ObjectResponse,
     RecommendationResponse,
     RefreshResponse,
+    RiskConfigResponse,
+    ScreeningConfigResponse,
     StatsResponse,
     TrendPoint,
 )
+from perigee.config import RiskConfig, ScreeningConfig
 from perigee.domain import ObjectType, OrbitalObject
 from perigee.narrative.templates import (
     event_summary,
@@ -225,11 +231,60 @@ async def agent_insights(request: Request) -> InsightsResponse:
     return InsightsResponse(**result.model_dump())
 
 
+@router.get("/objects", response_model=ObjectListResponse)
+async def list_objects(
+    request: Request,
+    search: Annotated[str | None, Query(max_length=80)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> ObjectListResponse:
+    rows = await _state(request).repository.list_objects(search=search or None, limit=limit)
+    items = [
+        ObjectListItemResponse(
+            norad_id=int(row["norad_id"]),
+            name=str(row["name"]),
+            object_type=str(row["object_type"]),
+            type_description=object_type_description(str(row["object_type"])),
+            epoch=row["epoch"],
+        )
+        for row in rows
+    ]
+    return ObjectListResponse(items=items, total_returned=len(items))
+
+
+@router.get("/config", response_model=ConfigResponse)
+async def get_config() -> ConfigResponse:
+    screening = ScreeningConfig()
+    risk = RiskConfig()
+    return ConfigResponse(
+        screening=ScreeningConfigResponse(
+            horizon_hours=screening.horizon_hours,
+            conjunction_threshold_km=screening.conjunction_threshold_km,
+            coorbital_relative_velocity_kmps=screening.coorbital_relative_velocity_kmps,
+            object_limit=screening.object_limit,
+            refresh_interval_hours=screening.refresh_interval_hours,
+        ),
+        risk=RiskConfigResponse(
+            weights={
+                "miss_distance": risk.distance_weight,
+                "relative_velocity": risk.velocity_weight,
+                "object_type": risk.object_type_weight,
+                "trend": risk.trend_weight,
+            },
+            critical_threshold=risk.critical_threshold,
+            elevated_threshold=risk.elevated_threshold,
+        ),
+    )
+
+
 @router.get("/stats", response_model=StatsResponse)
 async def stats(request: Request) -> StatsResponse:
     state = _state(request)
     row = await state.repository.stats()
     last = row["last_screened_at"]
+    # `last_refresh_at` lives in memory and resets on restart; fall back to the
+    # persisted screening timestamp so the header never claims "Never" while a
+    # valid catalog exists.
+    refresh_at = state.last_refresh_at or last
     return StatsResponse(
         objects_tracked=row["objects_tracked"],
         events_screened=row["events_screened"],
@@ -237,8 +292,8 @@ async def stats(request: Request) -> StatsResponse:
         elevated_count=row["elevated_count"],
         low_count=row["low_count"],
         last_screened_at=last,
-        last_refresh_at=state.last_refresh_at,
-        last_refresh_display=relative_time(state.last_refresh_at) if state.last_refresh_at else None,
+        last_refresh_at=refresh_at,
+        last_refresh_display=relative_time(refresh_at) if refresh_at else None,
         data_source=state.data_source,
         refresh_in_progress=state.refresh_in_progress,
         last_refresh_error=state.last_refresh_error,

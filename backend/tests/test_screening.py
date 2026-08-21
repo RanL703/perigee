@@ -27,6 +27,7 @@ def test_screen_reports_a_close_pass_with_km_units() -> None:
         coarse_step_seconds=600,
         fine_step_seconds=60,
         conjunction_threshold_km=0.01,
+        coorbital_relative_velocity_kmps=0.0,
     )
 
     events = screen([_object(25544, "A"), _object(25545, "B")], datetime(2024, 1, 1, tzinfo=UTC), config)
@@ -34,3 +35,19 @@ def test_screen_reports_a_close_pass_with_km_units() -> None:
     assert len(events) == 1
     assert events[0].miss_distance_km == 0
     assert events[0].relative_velocity_kmps == 0
+
+
+def test_screen_excludes_co_orbital_pairs() -> None:
+    # Docked modules and co-orbital clusters share nearly identical states;
+    # they never converge, so they must not flood the event list with
+    # identical 0 km encounters (default COORBITAL_RELATIVE_VELOCITY_KMPS).
+    config = ScreeningConfig(
+        horizon_hours=1,
+        coarse_step_seconds=600,
+        fine_step_seconds=60,
+        conjunction_threshold_km=0.01,
+    )
+
+    events = screen([_object(25544, "A"), _object(25545, "B")], datetime(2024, 1, 1, tzinfo=UTC), config)
+
+    assert events == []
