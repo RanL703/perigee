@@ -43,6 +43,18 @@
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "4eabc66183767153e404b39d1b839b1c37f2d82d86f0a0d7e880a579d8d62336"
     },
+    "git-guardrails-claude-code": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/misc/git-guardrails-claude-code/SKILL.md",
+      "computedHash": "ccf581d304132095c2787b0a3bcb7b4ff125863c9f796fb16311d8f1cacef470"
+    },
+    "prompt-optimizer": {
+      "source": "getsentry/skills",
+      "sourceType": "github",
+      "skillPath": "skills/prompt-optimizer/SKILL.md",
+      "computedHash": "b5b1f57c45ce10a5deeedeb1c3f418a069689d2b6ff9555e4a6c3d31cf9ae950"
+    },
     "qa-test-planner": {
       "source": "softaworks/agent-toolkit",
       "sourceType": "github",
@@ -60,6 +72,12 @@
       "sourceType": "github",
       "skillPath": "plugins/frontend/skills/shadcn-ui/SKILL.md",
       "computedHash": "3c80c7348aaab81e251ae73df8413d41348c3f5fbd0fc1cb398dd423ea7df020"
+    },
+    "structured-output": {
+      "source": "athola/claude-night-market",
+      "sourceType": "github",
+      "skillPath": "plugins/imbue/skills/structured-output/SKILL.md",
+      "computedHash": "7ce8435deb16c1cf10890598194a8d553cbe60e29914d082b55e12e39e4a0afa"
     }
   }
 }

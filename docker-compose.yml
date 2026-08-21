@@ -37,6 +37,13 @@ services:
       CELESTRAK_CATALOG_URL: ${CELESTRAK_CATALOG_URL:-https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=JSON}
       CELESTRAK_CACHE_PATH: /app/data/cache/celestrak_active.json
       OBJECT_LIMIT: ${OBJECT_LIMIT:-250}
+      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-true}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-20}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - perigee_catalog_cache:/app/data/cache
     ports:

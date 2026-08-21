@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+from perigee.agent.features import AgentFeatures
+from perigee.agent.ollama import OllamaAssistant
 from perigee.api.websocket import ConnectionManager
 from perigee.config import ScreeningConfig
 from perigee.ingestion.celestrak import fetch_catalog_result
@@ -17,6 +19,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AppState:
     repository: PerigeeRepository
+    assistant: OllamaAssistant | None = None
+    agent_features: AgentFeatures | None = None
     websocket_manager: ConnectionManager = field(default_factory=ConnectionManager)
     data_source: str = "unknown"
     last_refresh_at: datetime | None = None

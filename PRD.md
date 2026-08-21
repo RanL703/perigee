@@ -1,6 +1,6 @@
 # Perigee — Product Requirements Document
 ### Satellite Conjunction (Collision Risk) Triage Assistant
-**Version:** 1.0
+**Version:** 1.1
 **Prepared for:** Codex / AI coding agent implementation
 **Context:** SIH 2026 internal hackathon — needs to be functional, demo-ready, and visually strong within a short build window.
 
@@ -33,6 +33,9 @@ Codex must use the project's local skills when implementing or modifying the rel
     ├── accessibility/
     ├── motion/
     ├── playwright-local/
+    ├── langgraph-fundamentals/
+    ├── langgraph-human-in-the-loop/
+    ├── langgraph-persistence/
     └── perigee-*/              # project-specific skills when present
 ```
 
@@ -65,6 +68,7 @@ Before beginning implementation, Codex should inspect the available skills under
 | Orbital mechanics | `perigee-orbital-mechanics` when available | Treat SGP4/TLE propagation, units, timestamps, candidate filtering, and TCA calculations as numerical/physics-critical code. |
 | Perigee architecture | `perigee-architecture` when available | Enforce the module boundaries and dependency direction defined in this PRD. |
 | Demo reliability | `perigee-demo` when available | Prioritize cached-data fallback, deterministic demo behavior, visible loading states, and recovery from network failure. |
+| Agent orchestration (LangGraph/LangChain) | `langgraph-fundamentals`, `langgraph-human-in-the-loop`, `langgraph-persistence` | Apply strictly within Section 5.6's scope and guardrails — orchestration patterns must never be used to build anything that writes to the deterministic scoring/physics pipeline (Sections 5.2–5.3) or that issues autonomous actions. |
 
 ### 0.3 Skill activation rules
 
@@ -72,7 +76,7 @@ Before beginning implementation, Codex should inspect the available skills under
 2. **Use multiple skills when a task spans disciplines.** For example, a dashboard task may require `react-dev`, `frontend-design`, `shadcn-ui`, `accessibility`, and `motion`.
 3. **Do not blindly apply every installed skill.** Use only the skills relevant to the current change.
 4. **Project-specific skills take precedence for Perigee-specific rules.** Generic skills provide implementation guidance; the PRD and Perigee-specific skills define product constraints.
-5. **Do not let a skill override this PRD's functional, numerical, safety, or architectural requirements.**
+5. **Do not let a skill override this PRD's functional, numerical, safety, or architectural requirements.** This includes the AI/agentic guardrails in Section 5.6 — no skill, library convenience, or orchestration pattern may be used to introduce autonomous actions, probability claims, or a write path from the AI layer back into the deterministic engine.
 6. **When a skill recommends a library or pattern that conflicts with the locked stack in Section 8, keep the locked stack unless the PRD is explicitly changed.**
 7. **After substantial implementation work, run the relevant verification skill(s) before moving to the next phase.**
 
@@ -111,6 +115,7 @@ Perigee is a web application that ingests publicly available satellite orbital d
 - Present results in a polished, real-time-feeling "mission control" dashboard.
 - Be runnable end-to-end with a single command for demo purposes (Docker Compose).
 - Be resilient in a live demo (works offline / with cached data if network fails).
+- Layer optional, local AI-assisted features (natural-language explanation, per-alert recommendations, anomaly surfacing) strictly on top of the deterministic physics/scoring core — never replacing or feeding back into it (see Section 5.6).
 
 ### Non-Goals (explicitly out of scope for this build)
 - No actual maneuver planning / collision avoidance recommendations (risk triage only).
@@ -118,6 +123,9 @@ Perigee is a web application that ingests publicly available satellite orbital d
 - No user authentication/multi-tenant system — single shared dashboard is fine.
 - No mobile app — responsive web is sufficient.
 - No production-grade uncertainty/covariance modeling (stretch goal only, not required for MVP).
+- No autonomous spacecraft commands or automated maneuver/avoidance actions of any kind — this system is advisory/triage only, always human-in-the-loop (see Section 5.6 guardrails).
+- No AI-generated authoritative collision probability figures — qualitative tier language only, always attributed to the deterministic scoring engine.
+- No external/cloud LLM API calls — all AI features run on local Ollama inference only (see FR-32).
 
 ---
 
@@ -156,6 +164,11 @@ Perigee is a web application that ingests publicly available satellite orbital d
                 [React Dashboard Frontend]
               (list view, detail view, 3D globe,
                trend charts, live updates)
+                              ^
+                              |
+                  [Agentic AI Layer — read-only]
+              (LangGraph/LangChain over local Ollama;
+               see Section 5.6 — never writes upstream)
 ```
 
 ---
@@ -188,7 +201,7 @@ Perigee is a web application that ingests publicly available satellite orbital d
 
 ### 5.4 Backend API
 
-**Architecture note:** Structure the backend as clearly separated modules/services (not one monolithic file) so each piece can be built, tested, and debugged independently: `ingestion/`, `propagation/`, `scoring/`, `narrative/` (see FR-21a below), `api/` (routers), `websocket/`. This modularity matters more than usual here because Phase 1 (Section 10) explicitly requires verifying the math pipeline headlessly before the API layer even exists — a tangled structure would block that.
+**Architecture note:** Structure the backend as clearly separated modules/services (not one monolithic file) so each piece can be built, tested, and debugged independently: `ingestion/`, `propagation/`, `scoring/`, `narrative/` (see FR-21a below), `agentic/` (see Section 5.6), `api/` (routers), `websocket/`. This modularity matters more than usual here because Phase 1 (Section 10) explicitly requires verifying the math pipeline headlessly before the API layer even exists — a tangled structure would block that, and it also keeps the agentic layer physically separated from the code paths that write to `conjunction_events`.
 
 - **FR-15:** REST endpoint: `GET /api/events` — list conjunction events, filterable by tier (`?tier=critical`), sortable by score/TCA (`?sort=score_desc`), paginated (`?page=&limit=`). Response for each event must already include the plain-language summary field (FR-21a) pre-generated — never compute narrative text on the frontend.
 - **FR-16:** REST endpoint: `GET /api/events/{id}` — full detail for one event: factor breakdown object (each factor with its raw value, its contribution weight, and a plain-language caption per FR-21a), both objects' full metadata, TCA, miss distance, relative velocity, and the trend history array (for the sparkline/trend chart).
@@ -229,6 +242,7 @@ Perigee is a web application that ingests publicly available satellite orbital d
   4. "Why was this flagged?" factor breakdown chart — a horizontal bar chart (Recharts) showing each contributing factor (distance, velocity, object type, trend) as a labeled bar, with the highest-contributing factor visually emphasized. Above the chart, one sentence stating the single biggest driver in plain terms, e.g. "This was flagged mainly because of how close the pass is — not the speed or object type." This is the single highest-value piece of UI in the entire product for demonstrating "explainable, not black-box," and should get disproportionate design attention.
   5. Mini 3D view — zoomed-in orbital visualization showing just this pair's trajectories converging, with a marker at the TCA point.
   6. Trend sparkline — small inline chart (not the full trend view) showing whether this event's risk has been rising or falling across recent screenings, with a short label above it ("Trending: Worsening" / "Trending: Stable" / "Trending: Improving") rather than requiring the viewer to read the line direction themselves.
+  7. AI triage recommendation (see FR-42) — a short, clearly-tagged AI-assisted suggestion, distinct from the deterministic content above it.
 
 #### Screen 3 — 3D Orbital View (embedded on main dashboard, expandable to full view)
 
@@ -250,6 +264,63 @@ Perigee is a web application that ingests publicly available satellite orbital d
 
 ---
 
+### 5.6 Agentic Features (AI Layer)
+
+**Design principle governing this entire section (non-negotiable):** Orbital physics and risk scoring remain fully deterministic (per Section 5.2 and 5.3 — SGP4 propagation and the weighted scoring engine). The AI/agentic layer sits strictly *on top of* that deterministic core as a read-only interpretation and assistance layer. AI is used only where it is genuinely useful — natural-language explanation, learning-to-rank refinement, and anomaly detection — never to compute or alter the core physics or the primary risk score itself.
+
+**Hard guardrails (apply to every agentic feature below, no exceptions):**
+- **No autonomous spacecraft commands, ever.** The system never issues, simulates issuing, or drafts machine-executable maneuver/avoidance commands. It may only describe triage priority and suggest that a human review something.
+- **No authoritative collision probability claims.** The agent must never state or imply a precise probability of collision (e.g. "73% chance of collision"). It may describe qualitative risk tier and contributing factors only, using the same tier language as the deterministic scoring engine (Critical/Elevated/Low), and must always attribute the tier and score to the deterministic engine, not to itself.
+- **Human-in-the-loop by design.** Every agentic output is advisory text for a human to read and act on — never an action the system takes on its own (no auto-escalation, no auto-notification-send without a human clicking confirm, no auto-anything that changes system state beyond generating a suggestion).
+- **Every AI-generated statement in the UI must be visually distinguishable** from deterministic system output (e.g. a small "AI-assisted" tag/icon on any agent-generated text block) so a viewer always knows which numbers are hard physics/math and which text is model-generated interpretation. This is both a responsible-design requirement and a good demo talking point ("we're transparent about what's deterministic vs. AI-assisted").
+- **Agents only ever read from the API** (`GET` endpoints) for their context — they must never have write access to `objects`, `conjunction_events`, or trigger a re-screening cycle themselves. Only a human clicking "Refresh Now" (FR-18) can trigger re-computation.
+
+#### 5.6.1 Local Inference Setup
+
+- **FR-32:** All agentic/LLM features run **fully locally** via **Ollama**, using the **`qwen3.5:9b`** model for fast local inference — no external LLM API calls, no data leaving the local machine. This must be true both for reliability (no network dependency during a live demo) and for a clean "your orbital data never leaves your machine" story.
+- **FR-33:** The backend must expose a thin internal Ollama client wrapper (`agentic/llm_client.py` or similar) so the model name/endpoint is configured in one place (`OLLAMA_BASE_URL`, `OLLAMA_MODEL` env vars) — never hardcoded inline in agent logic, so swapping models later is a one-line config change.
+- **FR-34:** Include a startup health check that pings the local Ollama instance; if unreachable, the agentic features should degrade gracefully — UI shows an "AI features unavailable" state on the relevant components, while the deterministic dashboard (Sections 5.2–5.5) continues to work fully unaffected. This is the same fallback philosophy as NFR-2's cached-data behavior, applied to the AI layer.
+
+#### 5.6.2 Orchestration Framework
+
+- **FR-35:** Use **LangGraph** as the primary orchestration layer for any agentic feature involving multi-step reasoning or tool use (e.g. the query agent needing to decide which API endpoint to call before answering). Use plain **LangChain** primitives (prompt templates, output parsers) for simpler single-shot features (e.g. the per-alert recommendation, which doesn't need graph-based branching). Don't force LangGraph onto features that are genuinely single-call — keep the simplest tool that does the job, since build speed matters here.
+- **FR-36:** All agent prompts must be stored as versioned template files in one directory (`agentic/prompts/`), not inlined as strings scattered through the codebase — mirrors the FR-21a requirement for the deterministic narrative templates, and keeps prompt iteration fast during the hackathon.
+- **FR-37:** Every agent must be given its readable context **explicitly** (the relevant event JSON, factor breakdown, trend history — pulled via the existing REST endpoints) rather than free-roaming tool access to the whole database. Scope each agent's context tightly to what it needs to answer the specific question, both for speed (smaller context = faster local inference) and for safety (agent can't reference or hallucinate about data it wasn't given).
+
+#### 5.6.3 Feature 1 — "Ask Perigee" Natural-Language Query Bar
+
+- **FR-38:** A query input on the main dashboard where a user can ask plain-English questions about current screening results (e.g. "Which alerts involve debris?", "What's the most urgent thing right now?", "Explain this alert simply").
+- **FR-39:** Implementation: LangGraph agent with a small toolset limited to read-only wrappers around `GET /api/events`, `GET /api/events/{id}`, and `GET /api/stats` — the agent decides which tool(s) to call based on the question, retrieves real data, then generates a grounded natural-language answer. The agent must be prompted explicitly to answer only from retrieved data and to say "I don't have enough information to answer that" rather than guessing, if the data doesn't support an answer.
+- **FR-40:** Backend endpoint: `POST /api/agent/query` — accepts `{ "question": string }`, returns `{ "answer": string, "referenced_event_ids": [...] }` so the frontend can optionally deep-link the answer to the specific event cards it referenced (nice touch: clicking a referenced event ID in the AI's answer scrolls to/opens that card).
+- **FR-41:** Response time target: under ~5 seconds on local `qwen3.5:9b` inference for a typical query — validate this early in the build (Phase 1 or 2, not left until the end) since local model speed on the actual demo hardware needs to be confirmed, not assumed.
+
+#### 5.6.4 Feature 2 — Per-Alert Triage Recommendation
+
+- **FR-42:** On the event detail view (Screen 2, Section 5.5, item 7), an AI-generated one-to-two-sentence triage suggestion — e.g. "This pairing has stayed at Elevated risk for two consecutive screenings without worsening — recommend routine monitoring, no immediate escalation needed." Must be phrased as a *recommendation for human judgment*, never a directive or automated action, and must explicitly avoid numeric probability claims per the guardrails above.
+- **FR-43:** Implementation: simple LangChain prompt template (no LangGraph needed — single-shot, given the event's factor breakdown + tier + trend as context) run through the local Ollama model.
+- **FR-44:** Backend endpoint: `GET /api/events/{id}/recommendation` — generated on-demand when the detail panel opens (not precomputed for every event on every screening cycle, to keep the deterministic pipeline in Section 10/Phase 1 fully independent of AI availability) — cache the result per event per screening cycle so re-opening the same event doesn't re-run inference unnecessarily.
+
+#### 5.6.5 Feature 3 — Anomaly / Pattern Detection (stretch, build if time allows after 5.6.3–5.6.4 are solid)
+
+- **FR-45:** A periodic (or on-demand) agent pass over recent `event_history` data that surfaces plain-language observations a human might miss — e.g. "Object COSMOS-1408 debris has appeared in 3 separate conjunction events this week, more than any other object" or "Risk scores in this batch have trended upward over the last 3 screenings." This must be framed strictly as descriptive pattern-surfacing, not predictive/probabilistic claims.
+- **FR-46:** Implementation: LangGraph agent that queries `event_history` aggregates (via a small set of read-only summary tool calls, e.g. "get objects appearing in multiple events this week," "get events with worsening trend") and synthesizes findings into 2–4 short bullet observations.
+- **FR-47:** Backend endpoint: `GET /api/agent/insights` — returns a small list of `{ observation: string, related_event_ids: [...] }`. Surfaced on the dashboard as a small "Noticed something" panel, visually tagged as AI-assisted per the guardrails above.
+
+#### 5.6.6 Optional/Future — Learning-to-Rank Refinement (explicitly optional, not required for MVP)
+
+- **FR-48 (optional):** If time allows, an optional learning-to-rank layer may re-order events *within* their deterministically-assigned tier (never across tiers — a Low event must never be reranked into Critical by this layer) based on historical patterns of which factor combinations tend to matter most. This must be clearly labeled in the UI as an optional refinement (e.g. a toggle: "Use AI-assisted ranking within tiers") that a user can switch off to see the pure deterministic order — never silently replacing the deterministic ranking.
+- **FR-49 (optional):** If built, keep this simple (e.g. a lightweight scikit-learn model, not deep learning) and train it only on data generated within this project (screening history), never external/unrelated datasets — and clearly document that it's a ranking *refinement* layer, not a replacement for FR-11's scoring engine.
+
+#### 5.6.7 Explicit Non-Goals for the Agentic Layer
+
+To keep this section aligned with the stated design principles and prevent scope creep during the build:
+- No agent output is ever used as an input to the deterministic risk scoring engine (Section 5.3) — the data flow is one-directional: deterministic engine → AI layer, never the reverse. This keeps FR-11 through FR-14's scoring pipeline fully explainable and auditable independent of any LLM behavior.
+- No fine-tuning or training of the local model — use `qwen3.5:9b` as-is via prompting only; model training/fine-tuning is out of scope for the hackathon timeframe.
+- No agent is given the ability to call `POST /api/refresh` or any other state-changing endpoint.
+- No multi-agent "autonomous negotiation" or agent-to-agent action chains that result in system state changes without a human click in between.
+
+---
+
 ## 6. Non-Functional Requirements
 
 - **NFR-1 (Performance):** Full screening cycle for the default object set (~200–500 objects) must complete in under 60 seconds so the "Refresh Now" demo moment doesn't stall.
@@ -258,6 +329,7 @@ Perigee is a web application that ingests publicly available satellite orbital d
 - **NFR-4 (Explainability):** No risk score may be shown without an accompanying factor breakdown — black-box numbers are not acceptable per product philosophy.
 - **NFR-5 (Config-driven):** Screening threshold, risk weights, tier cutoffs, refresh interval, and object set filters must all be adjustable via a single config file/env vars, not hardcoded in logic.
 - **NFR-6 (Accuracy honesty):** UI copy must not overstate precision — this is a *screening/triage* tool using public TLE data (which has known accuracy limitations vs. precision tracking), not an operational collision-avoidance system. Include a small disclaimer in the UI footer.
+- **NFR-7 (AI availability independence):** The deterministic dashboard (Sections 5.2–5.5) must be fully functional with the agentic layer (Section 5.6) completely disabled or unreachable — the AI layer is additive, never a dependency of the core product.
 
 ---
 
@@ -273,6 +345,7 @@ This will be judged partly on visual impact by a panel that may not be deeply te
 - **Charts:** Use Recharts for the factor-breakdown and trend charts — clean, readable, no need for custom D3 unless time allows.
 - **Component library:** Use shadcn/ui + TailwindCSS for fast, polished, accessible UI primitives (cards, modals, badges, tooltips).
 - **Header stat strip:** Large animated counters for "Objects Tracked," "Events Screened Today," "Critical Alerts" — this kind of dashboard summary reads as "serious infrastructure" at a glance, which matters for non-technical judges.
+- **AI-assisted content styling:** Any AI-generated text block (query answers, per-alert recommendations, insights) uses a visually distinct treatment (e.g. a subtle accent border/icon + "AI-assisted" microlabel) so it never gets mistaken for deterministic system output — see Section 5.6 guardrails.
 
 ---
 
@@ -292,11 +365,13 @@ This will be judged partly on visual impact by a panel that may not be deeply te
 | 3D visualization | react-globe.gl (baseline), CesiumJS (stretch) |
 | Charts | Recharts |
 | Animation | Framer Motion |
+| Local LLM inference | Ollama, running `qwen3.5:9b` — fully local, no external API calls |
+| Agent orchestration | LangGraph (multi-step/tool-using agents) + LangChain (simple single-shot prompt features) |
 | Containerization | Docker + docker-compose |
 | Agent container tooling | Docker MCP plugin/server (installed locally so the coding agent can manage containers directly during development) |
+| Deployment (demo) | Render / Railway (backend), Vercel (frontend) |
 
 > **Agent skills note:** Skills listed in Section 0 are development-time procedural context for Codex. They are not runtime dependencies and must not be added to the application's Python or Node dependency manifests merely because they are installed in `.agents/skills/`.
-| Deployment (demo) | Render / Railway (backend), Vercel (frontend) |
 
 ---
 
@@ -328,11 +403,19 @@ This will be judged partly on visual impact by a panel that may not be deeply te
 - `risk_score`
 - `miss_distance_km`
 
+**`agent_recommendations`** (cache for FR-44, avoids re-running inference on every panel open)
+- `event_id` (FK → conjunction_events.id)
+- `screened_at` (the screening cycle this recommendation was generated for)
+- `recommendation_text`
+- `generated_at`
+
+> Note: this table is populated only by the agentic layer's own on-demand generation path (FR-44) — nothing in Sections 5.1–5.3's deterministic pipeline reads from or writes to it, preserving the one-directional data flow required in Section 5.6.7.
+
 ---
 
 ## 10. Build Plan / Milestones (suggested for hackathon timeframe)
 
-**Phase 0 — Environment setup (do this before any application code)**  
+**Phase 0 — Environment setup (do this before any application code)**
 **Skills:** `project-workflow`, `docker`, `docker-compose`, `database-schema-designer`
 0a. Install and configure the Docker MCP plugin/server locally so the coding agent can create, inspect, and manage containers directly (start/stop services, check logs, rebuild images) instead of requiring manual shell intervention for every Docker action. This should be set up first since every later phase depends on containerized services.
 0b. Stand up a local PostgreSQL instance as a Docker container (not a bare local install) — this becomes the persistent dev database for the `objects`, `conjunction_events`, and `event_history` tables defined in Section 9, and later folds directly into the full `docker-compose.yml` stack from NFR-3 rather than being a throwaway setup.
@@ -340,7 +423,7 @@ This will be judged partly on visual impact by a panel that may not be deeply te
    - Verify connectivity (e.g. via `psql` or the Postgres MCP server, if installed) before writing any application code against it — confirm the container starts cleanly, is reachable on the expected port, and persists data across a container restart.
    - This same Postgres service definition should be reused as-is when Redis, backend, and frontend services are added to the compose file later in Phase 5, so there's no rework — get the schema and container config right once here.
 
-**Phase 1 — Core data + math pipeline (get this working first, headless, no UI)**  
+**Phase 1 — Core data + math pipeline (get this working first, headless, no UI)**
 **Skills:** `project-workflow`, `deep-debug`, `testing-patterns`, `perigee-orbital-mechanics` (if installed)
 1. TLE fetcher from CelesTrak → store in the Dockerized Postgres instance from Phase 0.
 2. SGP4 propagation for object set + pairwise coarse filtering.
@@ -348,30 +431,38 @@ This will be judged partly on visual impact by a panel that may not be deeply te
 4. Risk scoring engine with factor breakdown.
 5. Verify with a script/CLI output before touching the API — confirm the math produces sane, explainable results.
 
-**Phase 2 — API layer**  
+**Phase 2 — API layer**
 **Skills:** `fastapi`, `fastapi-templates`, `testing-patterns`, `deep-debug`
 6. FastAPI endpoints per Section 5.4.
 7. WebSocket push on new event creation.
 8. APScheduler wiring for periodic refresh + manual refresh endpoint.
 
-**Phase 3 — Frontend core**  
+**Phase 3 — Frontend core**
 **Skills:** `react-dev`, `frontend-design`, `shadcn-ui`, `tailwind-v4-shadcn`, `accessibility`, `testing-patterns`
 9. Dashboard list view + stat header, wired to REST API.
 10. Event detail view with factor breakdown chart.
 11. WebSocket client integration for live updates.
 
-**Phase 4 — Visual centerpiece**  
+**Phase 4 — Visual centerpiece**
 **Skills:** `frontend-design`, `react-dev`, `motion`, `design-system`, `design-review`, `accessibility`
 12. 3D globe integration (react-globe.gl) with object markers + orbit paths.
 13. Highlight/focus behavior for selected conjunction event.
 14. Dark theme + animation pass (Framer Motion) across all views.
 
-**Phase 5 — Demo hardening**  
+**Phase 5 — Demo hardening**
 **Skills:** `docker`, `docker-compose`, `playwright-local`, `testing-patterns`, `code-review`, `deep-debug`, `perigee-demo` (if installed)
 15. Cached-data fallback if live fetch fails.
 16. Docker Compose for one-command spin-up.
 17. Seed/demo dataset locked in ahead of time as a safety net in case live data or network is unreliable during judging.
 18. Final UI polish pass — stat counters, before/after toggle, disclaimer copy.
+
+**Phase 6 — Agentic AI layer (build last, only once Phases 1–5 are solid — see Section 5.6)**
+**Skills:** `langgraph-fundamentals`, `langgraph-human-in-the-loop`, `langgraph-persistence`, `fastapi`, `testing-patterns`, `deep-debug`, `code-review`
+19. Set up local Ollama with `qwen3.5:9b`, wire up the `llm_client.py` wrapper and health check (FR-32–FR-34).
+20. Build Feature 2 first (per-alert triage recommendation, FR-42–FR-44) — it's the simpler single-shot LangChain implementation, good for validating local inference speed and prompt quality before investing in LangGraph.
+21. Build Feature 1 ("Ask Perigee" query bar, FR-38–FR-41) — LangGraph agent with read-only tool access.
+22. Add the "AI-assisted" visual tagging across the UI wherever agent output appears (guardrail requirement, Section 5.6).
+23. If time remains: Feature 3 (anomaly/pattern detection, FR-45–FR-47), then the optional learning-to-rank refinement (FR-48–FR-49) last, since both are explicitly stretch scope.
 
 ---
 
@@ -416,6 +507,17 @@ Each phase must have a verification pass before the next phase begins.
 - Perform a final code-review and browser verification pass.
 - Use `playwright-local`, `testing-patterns`, `code-review`, `deep-debug`, `docker`, and `docker-compose` as applicable.
 
+### Gate F — Agentic layer
+
+- Confirm the Ollama health check works and the AI layer degrades gracefully when Ollama is stopped (dashboard remains fully functional per NFR-7).
+- Confirm no agent has write access to `objects`, `conjunction_events`, or `POST /api/refresh` — inspect the agent tool definitions directly, don't just test happy-path behavior.
+- Confirm every AI-generated text block is visually tagged as AI-assisted and is visually distinct from deterministic content.
+- Spot-check agent outputs across several events for guardrail violations: no probability figures, no directive/command language, no claims not grounded in the retrieved data.
+- Confirm `POST /api/agent/query` and `GET /api/events/{id}/recommendation` respond within the target latency (FR-41) on the actual demo hardware.
+- Use `langgraph-fundamentals`, `langgraph-human-in-the-loop`, `deep-debug`, `testing-patterns`, and `code-review`.
+
+---
+
 ## 11. Acceptance Criteria (MVP "done" definition)
 
 - [ ] App boots fully via `docker-compose up` with no manual steps.
@@ -426,6 +528,12 @@ Each phase must have a verification pass before the next phase begins.
 - [ ] 3D globe renders tracked objects and highlights the selected conjunction event.
 - [ ] App still functions (using cached data) if network access is cut mid-demo.
 - [ ] Swagger/OpenAPI docs are accessible at `/docs`.
+- [ ] A person with no orbital-mechanics background can look at the main dashboard, unprompted, and correctly state which alert is most urgent and roughly why — validate this with at least one genuine non-technical reviewer (a teammate outside the core dev team, a friend, etc.) before the demo, not just the build team.
+- [ ] Every risk score, miss distance, velocity, and TCA visible anywhere in the UI has an accompanying plain-language caption or display string — no raw unexplained numbers.
+- [ ] All AI-generated text is visually tagged as AI-assisted and distinguishable from deterministic system output.
+- [ ] The deterministic dashboard (screening, scoring, event list, 3D globe) functions fully and correctly even with Ollama/the AI layer completely stopped or unreachable.
+- [ ] No agent-generated text anywhere in the app states or implies a numeric collision probability, and no UI element allows issuing or simulating a spacecraft command.
+- [ ] All LLM inference runs against the local Ollama endpoint only — confirm no outbound calls to external LLM APIs occur (e.g. by checking network activity with the AI features in use).
 
 ---
 
@@ -434,7 +542,8 @@ Each phase must have a verification pass before the next phase begins.
 - **Object set size for demo:** recommend starting with a curated ~200–300 object subset (mix of active payloads + debris in similar altitude bands) rather than the full catalog, to guarantee real conjunctions show up without needing to screen tens of thousands of objects. Codex should pick a sensible filtered CelesTrak group (e.g. "active satellites" + a debris group) and make this configurable.
 - **Screening threshold tuning:** 5 km default miss-distance threshold may need adjusting based on how many events it surfaces in practice — should be trivially configurable, not hardcoded.
 - **Space-Track credentials:** optional — if not provided, system should run entirely on CelesTrak with no degraded functionality (this must not be a hard dependency).
+- **Local Ollama/`qwen3.5:9b` performance on demo hardware:** validate actual response latency early (Phase 6, step 19–20) rather than assuming the FR-41 target holds — if the demo machine is underpowered, consider a smaller/quantized model as a fallback, but keep it local per FR-32's non-goal on external calls.
 
 ---
 
-**End of PRD.** This document is intended to be handed directly to an AI coding agent (Codex) as the primary build spec. Section 10 (Build Plan) should be treated as the implementation order.
+**End of PRD.** This document is intended to be handed directly to an AI coding agent (Codex) as the primary build spec. Section 10 (Build Plan) should be treated as the implementation order, and Section 10a's gates should be treated as mandatory checkpoints between phases.

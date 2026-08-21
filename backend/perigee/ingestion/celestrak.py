@@ -158,7 +158,13 @@ def fetch_catalog_result(
     for attempt in range(max(1, retries)):
         try:
             with httpx.Client(timeout=timeout, follow_redirects=True, transport=transport) as client:
-                response = client.get(url)
+                response = client.get(
+                    url,
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": "Perigee/0.1 (+https://github.com/RanL703/perigee)",
+                    },
+                )
                 response.raise_for_status()
                 payload = response.json()
             if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):

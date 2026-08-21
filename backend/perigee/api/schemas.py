@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -75,6 +75,48 @@ class RefreshResponse(BaseModel):
     job_id: UUID
     status: str
     message: str
+
+
+class ExplainResponse(BaseModel):
+    headline: str
+    explanation: str
+    operator_focus: list[str]
+    caveat: str
+    source: Literal["ollama", "template"]
+    model: str
+    provider_error: str | None = None
+
+
+class AgentQueryRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=500)
+
+
+class AgentQueryResponse(BaseModel):
+    answer: str
+    referenced_event_ids: list[str]
+    source: Literal["ollama", "template"]
+    model: str
+    provider_error: str | None = None
+
+
+class RecommendationResponse(BaseModel):
+    recommendation: str
+    source: Literal["ollama", "template"]
+    model: str
+    screened_at: str
+    provider_error: str | None = None
+
+
+class InsightResponse(BaseModel):
+    observation: str
+    related_event_ids: list[str]
+
+
+class InsightsResponse(BaseModel):
+    insights: list[InsightResponse]
+    source: Literal["ollama", "template"]
+    model: str
+    provider_error: str | None = None
 
 
 class EventListResponse(BaseModel):

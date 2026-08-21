@@ -17,6 +17,16 @@ class PerigeeRepository:
 
     async def connect(self) -> None:
         self._pool = await asyncpg.create_pool(self._database_url, min_size=1, max_size=5)
+        async with self._connection_pool.acquire() as connection:
+            await connection.execute(
+                """CREATE TABLE IF NOT EXISTS agent_recommendations (
+                    event_id UUID NOT NULL REFERENCES conjunction_events(id) ON DELETE CASCADE,
+                    screened_at TIMESTAMPTZ NOT NULL,
+                    recommendation_text TEXT NOT NULL,
+                    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (event_id, screened_at)
+                )"""
+            )
 
     async def close(self) -> None:
         if self._pool is not None:
@@ -192,6 +202,33 @@ class PerigeeRepository:
             if isinstance(data.get("gp_data"), str):
                 data["gp_data"] = json.loads(data["gp_data"])
             return data
+
+    async def get_recommendation(self, event_id: UUID, screened_at: datetime) -> str | None:
+        query = """SELECT recommendation_text FROM agent_recommendations
+                   WHERE event_id = $1 AND screened_at = $2"""
+        async with self._connection_pool.acquire() as connection:
+            value = await connection.fetchval(query, event_id, screened_at)
+            return str(value) if value is not None else None
+
+    async def save_recommendation(self, event_id: UUID, screened_at: datetime, text: str) -> None:
+        query = """INSERT INTO agent_recommendations (event_id, screened_at, recommendation_text)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (event_id, screened_at) DO UPDATE SET
+                     recommendation_text = EXCLUDED.recommendation_text,
+                     generated_at = NOW()"""
+        async with self._connection_pool.acquire() as connection:
+            await connection.execute(query, event_id, screened_at, text)
+
+    async def agent_event_context(self, limit: int = 25) -> list[dict[str, object]]:
+        query = """SELECT e.id, a.name AS object_a_name, b.name AS object_b_name,
+                          e.risk_score, e.risk_tier, e.miss_distance_km,
+                          e.relative_velocity_kmps, e.tca, e.screened_at
+                   FROM conjunction_events e
+                   JOIN objects a ON a.norad_id = e.object_a_id
+                   JOIN objects b ON b.norad_id = e.object_b_id
+                   ORDER BY e.risk_score DESC, e.tca ASC LIMIT $1"""
+        async with self._connection_pool.acquire() as connection:
+            return [dict(row) for row in await connection.fetch(query, limit)]
 
     async def stats(self) -> asyncpg.Record:
         query = """

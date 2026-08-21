@@ -7,13 +7,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 
+from perigee.agent.schemas import AgentExplanationResponse
 from perigee.api.schemas import (
+    AgentQueryRequest,
+    AgentQueryResponse,
     EventDetailResponse,
     EventListResponse,
     EventObjectResponse,
     EventSummaryResponse,
+    ExplainResponse,
     FactorResponse,
+    InsightsResponse,
     ObjectResponse,
+    RecommendationResponse,
     RefreshResponse,
     StatsResponse,
     TrendPoint,
@@ -130,6 +136,93 @@ async def refresh(request: Request) -> RefreshResponse:
         status="in_progress",
         message="Screening started; listen for refresh_completed on /ws/events.",
     )
+
+
+@router.post("/events/{event_id}/explain", response_model=ExplainResponse)
+async def explain_event(request: Request, event_id: UUID) -> ExplainResponse:
+    state = _state(request)
+    row = await state.repository.get_event(event_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conjunction event not found")
+    if state.assistant is None:
+        raise HTTPException(status_code=503, detail="Operator assistant is not configured")
+    raw_factors = row["factor_breakdown"]
+    if isinstance(raw_factors, str):
+        raw_factors = json.loads(raw_factors)
+    facts = {
+        "object_a_name": row["object_a_name"],
+        "object_b_name": row["object_b_name"],
+        "risk_score": float(row["risk_score"]),
+        "risk_tier": str(row["risk_tier"]),
+        "miss_distance_km": float(row["miss_distance_km"]),
+        "relative_velocity_kmps": float(row["relative_velocity_kmps"]),
+        "tca": row["tca"],
+        "factor_breakdown": raw_factors,
+    }
+    result: AgentExplanationResponse = await state.assistant.explain(facts)
+    return ExplainResponse(**result.model_dump())
+
+
+@router.post("/agent/query", response_model=AgentQueryResponse)
+async def agent_query(request: Request, payload: AgentQueryRequest) -> AgentQueryResponse:
+    state = _state(request)
+    if state.agent_features is None:
+        raise HTTPException(status_code=503, detail="Agent features are not configured")
+    stats_row = await state.repository.stats()
+    events = await state.repository.agent_event_context()
+    context = {
+        "stats": dict(stats_row),
+        "events": events,
+    }
+    result = await state.agent_features.query(payload.question, context)
+    return AgentQueryResponse(**result.model_dump())
+
+
+@router.get("/events/{event_id}/recommendation", response_model=RecommendationResponse)
+async def event_recommendation(request: Request, event_id: UUID) -> RecommendationResponse:
+    state = _state(request)
+    if state.agent_features is None:
+        raise HTTPException(status_code=503, detail="Agent features are not configured")
+    row = await state.repository.get_event(event_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conjunction event not found")
+    screened_at = row["screened_at"]
+    cached = await state.repository.get_recommendation(event_id, screened_at)
+    if cached is not None:
+        return RecommendationResponse(
+            recommendation=cached,
+            source="ollama",
+            model=state.agent_features.config.model,
+            screened_at=screened_at.isoformat(),
+        )
+    raw_factors = row["factor_breakdown"]
+    if isinstance(raw_factors, str):
+        raw_factors = json.loads(raw_factors)
+    facts = {
+        "event_id": str(event_id),
+        "object_a_name": row["object_a_name"],
+        "object_b_name": row["object_b_name"],
+        "risk_score": float(row["risk_score"]),
+        "risk_tier": str(row["risk_tier"]),
+        "miss_distance_km": float(row["miss_distance_km"]),
+        "relative_velocity_kmps": float(row["relative_velocity_kmps"]),
+        "tca": row["tca"],
+        "trend_history": row["history"],
+        "factor_breakdown": raw_factors,
+    }
+    result = await state.agent_features.recommendation(facts, screened_at)
+    if result.source == "ollama":
+        await state.repository.save_recommendation(event_id, screened_at, result.recommendation)
+    return RecommendationResponse(**result.model_dump())
+
+
+@router.get("/agent/insights", response_model=InsightsResponse)
+async def agent_insights(request: Request) -> InsightsResponse:
+    state = _state(request)
+    if state.agent_features is None:
+        raise HTTPException(status_code=503, detail="Agent features are not configured")
+    result = await state.agent_features.insights({"events": await state.repository.agent_event_context()})
+    return InsightsResponse(**result.model_dump())
 
 
 @router.get("/stats", response_model=StatsResponse)
