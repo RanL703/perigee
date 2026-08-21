@@ -18,7 +18,7 @@ CelesTrak JSON/TLE
                          local Ollama (optional, read-only)
 ```
 
-The backend is FastAPI (not Flask). The frontend is a separate Vite development server during local demos.
+The backend is FastAPI. The frontend is a separate Vite development server during local demos.
 
 ## Fast demo setup
 
