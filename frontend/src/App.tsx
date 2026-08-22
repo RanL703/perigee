@@ -129,8 +129,7 @@ function App() {
       </button>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-icon">P</div>
-          <span>PERIGEE</span>
+          <img src="/perigee-logo.png" alt="Perigee" className="brand-logo" />
         </div>
         <nav>
           {navItems.map((item) => (
